@@ -47,17 +47,17 @@ with col2:
 
     roi_count = len([f for f in os.listdir(ROI_DIR) if f.endswith(".json")]) if os.path.exists(ROI_DIR) else 0
     with st.container(border=True):
-        st.caption("저장된 ROI")
+        st.caption("🗺️ 저장된 ROI")
         st.markdown(f"### {roi_count}개")
 
     event_count = len([f for f in os.listdir(EVENTS_DIR) if f.endswith(".jpg")]) if os.path.exists(EVENTS_DIR) else 0
     with st.container(border=True):
-        st.caption("저장된 이벤트 이미지")
+        st.caption("🖼️ 저장된 이벤트 이미지")
         st.markdown(f"### {event_count}개")
 
     data_count = len([f for f in os.listdir(DATA_DIR) if f.endswith((".mp4", ".avi", ".mov"))]) if os.path.exists(DATA_DIR) else 0
     with st.container(border=True):
-        st.caption("샘플 영상 파일")
+        st.caption("🎬 샘플 영상 파일")
         st.markdown(f"### {data_count}개")
 
     st.markdown("---")

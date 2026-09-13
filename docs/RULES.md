@@ -27,3 +27,115 @@
 - 테스트를 실행하지 못했다면 성공으로 기록하지 말고 사유와 수동 확인 절차를 남긴다.
 - 영상·RTSP·YOLO 검증은 장치, 모델, 코덱, 네트워크 조건을 결과에 함께 기록한다.
 - 위험 판정 변경 시 최소한 정상, 사람만, 차량만, ROI 밖 동시 탐지, ROI 안 동시 탐지, 정지 차량 사례를 확인한다.
+
+## 작업 상태(State)
+
+`docs/tasks/current.md` 최상단 상태 필드는 다음 6개 값 중 하나로만 표기한다. 자동으로 전환을 검사·강제하는 도구는 두지 않으며, 각 담당자가 자기 단계를 마칠 때 값을 직접 갱신한다.
+
+```
+planned → implementing → implemented → reviewing → approved → verified
+```
+
+문제가 발견되면 `reviewing` / `approved` / `verified` 어느 단계에서도 `implementing`으로 되돌릴 수 있다.
+
+### 상태별 의미
+
+| 상태 | 의미 |
+|---|---|
+| `planned` | Claude가 목표·범위·계획·수용 기준·파일 소유권을 작성 완료. 코드 변경 없음. |
+| `implementing` | Codex가 승인된 계획에 따라 소유한 파일을 실제로 수정하는 중. |
+| `implemented` | Codex가 구현과 가능한 테스트를 마치고 결과를 `current.md`에 기록 완료. Reviewer 검토 대기. |
+| `reviewing` | Claude가 diff와 `current.md`를 대조하며 검토 진행 중. |
+| `approved` | Claude가 리뷰 기준(계획 범위 준수, 로직 보존, 회귀 없음 등)을 확인하고 통과. |
+| `verified` | 사용자가 실제 화면·동작을 직접 확인하고 최종 확정. 작업 종료 지점. |
+
+### 전환 주체
+
+| 전환 | 주체 |
+|---|---|
+| (신규 작업) → `planned` | Claude |
+| `planned` → `implementing` | Codex (아래 승인 규칙 적용) |
+| `implementing` → `implemented` | Codex |
+| `implemented` → `reviewing` | Claude |
+| `reviewing` → `approved` | Claude |
+| `approved` → `verified` | 사용자만 |
+| `reviewing` / `approved` / `verified` → `implementing` (반려) | 문제를 발견한 쪽 (Claude 또는 사용자) |
+
+### `planned` → `implementing` 승인 규칙
+
+이 전환에는 기본적으로 매번 사용자 승인이 필요하지 않다. 계획이 명확하고 이 문서의 다른 규칙(변경 범위, 파일 소유권 등)을 충족하는 일반적인 소규모 기능 추가·버그 수정은, Planner가 계획을 `current.md`에 작성 완료하면 Codex가 바로 `implementing`으로 넘어갈 수 있다.
+
+다만 다음 중 하나에 해당하면 `implementing` 전환 전 반드시 사용자 승인을 받는다.
+
+- 대규모 리팩터링
+- 아키텍처/디렉터리 구조 변경
+- 새 의존성 설치
+- 데이터 형식 변경
+- 프레임워크·모델 교체
+- 프로젝트 방향 변경
+- 민감정보 또는 외부 시스템에 영향을 주는 작업 (RTSP 계정정보, git push, 외부 서버 공개 등)
+
+해당 여부가 애매하면 승인이 필요한 쪽으로 판단한다.
+
+### `approved` → `verified` 승인 규칙
+
+이 전환은 항상 사용자만 할 수 있다. Claude의 리뷰는 diff와 계획의 일치 여부를 확인하는 정적 검토이므로, 실제 화면·동작은 사용자가 직접 확인해야 작업이 최종 종료된다.
+
+### 작업 시작 전 확인 순서
+
+Claude와 Codex는 작업을 시작하기 전에 항상 다음 순서로 확인한다.
+
+1. `AGENTS.md`
+2. 자신의 역할 문서 — Claude는 `CLAUDE.md`. Codex는 별도 파일이 없으므로 `AGENTS.md`의 "Codex — Builder / Tester" 항목을 역할 문서로 삼는다(중복 문서로 인한 드리프트를 막기 위해 `CODEX.md`는 만들지 않는다).
+3. `docs/RULES.md` (이 문서)
+4. `docs/tasks/current.md`
+5. `git status` / 필요한 `git diff` — 작업 트리가 `current.md`의 서술과 실제로 일치하는지 확인
+
+### 핸드오프 고정 필드
+
+`docs/tasks/current.md` 최상단에는 아래 3개 고정 필드를 둔다. Planner가 계획 작성 시 채우고, 이후 갱신하는 쪽이 매번 값을 최신화한다.
+
+```
+**State:** <6개 값 중 하나>
+**기준 커밋:** <git rev-parse HEAD 값, 계획 작성 시점 기록>
+**승인 필요:** 아니오 | 예 (사유: <RULES.md 예외 카테고리>) — 사용자 승인: 대기 / 완료 (일시)
+**최종 갱신:** <담당자>, <타임스탬프>
+```
+
+- **기준 커밋**: Codex는 착수 전 현재 `HEAD`와 이 값을 비교한다. 다르면 계획이 그 사이의 변경을 반영하지 못했을 수 있으므로 착수하지 않고 보고한다.
+- **승인 필요**: "예"이고 "사용자 승인"이 "완료"로 기록되기 전까지 Codex는 `implementing`으로 전환하지 않는다. 이 필드를 "완료"로 바꾸는 주체는 사용자의 승인 의사를 받은 쪽(주로 Claude)이며, **Codex는 스스로 이 필드를 완료 처리할 수 없다.**
+- **최종 갱신**: 다른 에이전트는 자신이 마지막으로 읽은 값과 비교해, 값이 달라져 있으면 자신이 못 본 변경이 있었다고 보고 문서를 처음부터 다시 읽는다.
+
+Codex가 구현을 마치고 남기는 "구현 결과"·"테스트 결과"에는 다음도 포함한다: 계획 대비 벗어난 부분("계획 이탈 사항", 없으면 "없음"으로 명시), 수용 기준 항목별 pass/fail/미실행 체크리스트, 종료 시점 `git status --porcelain` 요약(Claude가 리뷰 시 대조용).
+
+### State별 행동 규칙
+
+| State | Claude | Codex |
+|---|---|---|
+| (State 없음/새 요청) | 확인 순서대로 점검 후 계획 작성, `planned`로 설정 | 대기 |
+| `planned` (승인 필요 아니오, 또는 승인 완료) | 대기 | 점검 후 착수, `implementing`으로 전환 |
+| `planned` (승인 필요 예, 미완료) | 사용자에게 승인 요청, 대기 | 착수 금지, 대기 |
+| `implementing` | 대기 | 계획된 파일만 구현 |
+| `implemented` | 점검 후 검토 시작, `reviewing`으로 전환 | 대기 |
+| `reviewing` | 검토 → 통과 시 `approved`, 문제 시 `implementing`으로 반려하고 수정 항목 기록 | 대기 |
+| `approved` | 대기, 사용자 확인 요청 | 대기 |
+| `verified` | 작업 종료. 새 요청 시 아래 "verified 이후 초기화" 절차 수행 | 대기 |
+
+원칙: 자기 차례가 아닌 State를 보면 어떤 파일도 수정하지 않고 대기하거나 상태만 보고한다.
+
+### Stale State·불일치 감지
+
+다음 중 하나라도 해당하면 발견한 쪽은 즉시 작업을 멈추고 무엇이 불일치하는지 보고한다.
+
+1. `기준 커밋`이 현재 `git rev-parse HEAD`와 다르다.
+2. `최종 갱신` 값이 자신이 마지막으로 확인했던 값과 다르다.
+3. `git status`/`git diff` 결과가 `current.md`의 "예상 변경 파일" 또는 "구현 결과"에 없는 변경을 포함한다.
+4. `State` 값이 정의된 6개 값 중 하나가 아니거나 필드가 비어 있거나 형식이 깨져 있다.
+5. 이미 다른 에이전트가 진행 중인 파일을 소유권 확인 없이 건드리려 한다.
+
+### `verified` 이후 초기화와 보관(Archive)
+
+- `docs/tasks/current.md`는 항상 진행 중인 단일 작업만 담는다. 여러 작업의 이력을 이 파일 안에 누적하지 않는다.
+- 작업이 `verified`로 종료되고 다음 작업을 시작할 때, Claude는 종료된 `current.md`의 전체 내용을 `docs/tasks/archive/YYYY-MM-DD-짧은슬러그.md`로 복사해 보관한 뒤 `current.md`를 표준 빈 템플릿(목표·범위·계획 등을 "없음"으로 둔 최초 형태)으로 초기화한다.
+- 이 보관 절차는 2026-09-13 사용자 승인에 따라 **매번 재승인 없이 자동으로 수행한다.** `docs/tasks/archive/`에는 작업 기록만 두며 제품 코드나 실행 스크립트는 두지 않는다. 세부 규칙은 `docs/tasks/archive/README.md`를 따른다.
+- 초기화 직후에는 State와 3개 고정 필드를 비우거나 "없음"으로 표시해, 이전 작업의 값이 새 작업에 남아 있지 않게 한다.

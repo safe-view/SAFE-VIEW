@@ -57,7 +57,7 @@ planned → implementing → implemented → reviewing → approved → verified
 | `planned` → `implementing` | Codex (아래 승인 규칙 적용) |
 | `implementing` → `implemented` | Codex |
 | `implemented` → `reviewing` | Claude |
-| `reviewing` → `approved` | Claude |
+| `reviewing` → `approved` | Claude (하네스 자동 호출 시 예외는 아래 "하네스 사용 시 Reviewer 권한" 참고) |
 | `approved` → `verified` | 사용자만 |
 | `reviewing` / `approved` / `verified` → `implementing` (반려) | 문제를 발견한 쪽 (Claude 또는 사용자) |
 
@@ -106,7 +106,24 @@ Claude와 Codex는 작업을 시작하기 전에 항상 다음 순서로 확인�
 - **승인 필요**: "예"이고 "사용자 승인"이 "완료"로 기록되기 전까지 Codex는 `implementing`으로 전환하지 않는다. 이 필드를 "완료"로 바꾸는 주체는 사용자의 승인 의사를 받은 쪽(주로 Claude)이며, **Codex는 스스로 이 필드를 완료 처리할 수 없다.**
 - **최종 갱신**: 다른 에이전트는 자신이 마지막으로 읽은 값과 비교해, 값이 달라져 있으면 자신이 못 본 변경이 있었다고 보고 문서를 처음부터 다시 읽는다.
 
-Codex가 구현을 마치고 남기는 "구현 결과"·"테스트 결과"에는 다음도 포함한다: 계획 대비 벗어난 부분("계획 이탈 사항", 없으면 "없음"으로 명시), 수용 기준 항목별 pass/fail/미실행 체크리스트, 종료 시점 `git status --porcelain` 요약(Claude가 리뷰 시 대조용).
+Planner가 계획을 작성할 때 `current.md`의 "구현 결과"/"테스트 결과" 섹션을 자유 서술 안내문이 아니라 아래처럼 **미리 빈칸이 있는 형태**로 작성해 둔다. Codex는 이 빈칸을 채우기만 하면 된다.
+
+```
+## 구현 결과
+- 실제 변경 파일: (Codex 작성)
+- 계획 대비 변경 요약: (Codex 작성)
+- 계획 이탈 사항: (Codex 작성 — 없으면 "없음"이라고 명시할 것)
+- 종료 시점 git 상태: (Codex 작성 — `git status --porcelain` 결과 붙여넣기)
+
+## 테스트 결과
+- 실행 명령/검증: (Codex 작성)
+- 수용 기준 체크리스트: (아래 수용 기준을 그대로 복사해 각 항목 옆에 PASS/FAIL/미실행 표기)
+  - [ ] <수용 기준 1>
+  - [ ] <수용 기준 2>
+- 미실행 항목과 사유: (Codex 작성)
+```
+
+`(Codex 작성)` placeholder가 그대로 남아 있거나 위 항목이 비어 있으면 위 "리뷰 0번째 항목"에 따라 반려된다.
 
 ### State별 행동 규칙
 
@@ -122,6 +139,21 @@ Codex가 구현을 마치고 남기는 "구현 결과"·"테스트 결과"에는
 | `verified` | 작업 종료. 새 요청 시 아래 "verified 이후 초기화" 절차 수행 | 대기 |
 
 원칙: 자기 차례가 아닌 State를 보면 어떤 파일도 수정하지 않고 대기하거나 상태만 보고한다.
+
+### 리뷰 0번째 항목: 핸드오프 형식 완전성
+
+Claude(Reviewer)는 계획 범위 준수나 로직 보존 같은 실질 검토에 앞서, 가장 먼저 "구현 결과"/"테스트 결과"의 핸드오프 형식이 완전한지 확인한다 — 계획 이탈 사항, 종료 시점 git 상태, 수용 기준 체크리스트(`- [ ]` 형태) 중 하나라도 비어 있거나 `(Codex 작성)` 같은 placeholder가 그대로 남아 있으면, Reviewer가 그 자리를 대신 채우거나 diff로 대신 확인해주지 않는다. **형식 누락 자체를 반려 사유로 삼아** State를 `implementing`으로 되돌린다. Builder(Codex)의 기록 의무를 Reviewer가 대신 이행해주지 않기 위함이다.
+
+### 하네스(자동 호출) 사용 시 Reviewer 권한
+
+`tools/harness/run-next-step.ps1`을 통해 Claude를 비대화식으로 호출하는 경우, Claude는 다음 조건으로 실행된다.
+
+- `--permission-mode plan` + 읽기 전용 `--allowedTools`(`Read`, `Grep`, `Glob`, 읽기 전용 git `Bash` 명령) — 어떤 파일도 직접 쓸 수 없다. `docs/tasks/current.md`도 포함한다.
+- `--output-format json` + `--json-schema`(`tools/harness/review-schema.json`) — 자유 서술이 아니라 스키마에 맞는 구조화된 JSON 하나만 반환한다.
+
+이 경우 `docs/tasks/current.md`의 `State` 줄 / `최종 갱신` 줄 / `## 리뷰 및 남은 위험` 섹션 세 곳을 실제로 갱신하는 것은 **Harness(스크립트)**다. Harness는 (1) JSON 파싱과 필수 필드 존재, (2) `base_commit_checked`가 `기준 커밋`·현재 `git rev-parse HEAD`와 모두 일치, (3) `rejected`이면 `rejection_reasons`가 비어 있지 않음을 모두 통과했을 때만 반영하며, 검증에 실패하면 State를 바꾸지 않고 수동 확인을 요청한다. 이는 "판단은 Claude, 쓰기 실행은 결정론적 스크립트"로 책임을 분리해 최소 권한을 지키기 위한 구조이며, 오케스트레이터가 `current.md`를 직접 수정하지 않는다는 원칙(위 "State별 행동 규칙" 참고)에 대한 명시적 예외다. 이 세 지점 외의 어떤 줄도 Harness는 쓰지 않는다.
+
+**사용자가 대화로 직접 "현재 작업 리뷰해"라고 요청하는 경우에는 이 제한이 적용되지 않는다** — 지금까지처럼 Claude가 대화형 세션에서 직접 `current.md`를 읽고 갱신한다. 위 읽기 전용 제한과 Harness 예외는 사람 없이 Claude를 자동 호출할 때만 적용되는 자동화 전용 규칙이다.
 
 ### Stale State·불일치 감지
 

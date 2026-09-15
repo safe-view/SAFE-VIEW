@@ -24,6 +24,10 @@ Claude와 Codex는 작업을 시작하기 전에 항상 이 순서로 확인한�
 
 `tools/harness/run-next-step.ps1`은 위 2·4단계에서 사람이 매번 "진행해"/"리뷰해"라고 입력하지 않아도 되도록 Codex/Claude를 1회씩 대신 호출하는 보조 스크립트다(호출 1회당 정확히 한 단계만 진행하고 종료, watch/loop 없음). 이 스크립트로 Claude를 호출할 때는 Claude가 읽기 전용으로 실행되고 `current.md` 갱신은 스크립트가 검증된 결과에 한해 대신 수행한다 — 자세한 권한 구조는 `docs/RULES.md`의 "하네스(자동 호출) 사용 시 Reviewer 권한"을 따른다. 사용자가 대화로 직접 "진행해"/"리뷰해"라고 요청하는 경우에는 이 스크립트와 무관하게 지금까지와 동일하게 동작한다. 종료 후 다음 작업을 시작할 때는 Planner가 `current.md`를 `docs/tasks/archive/YYYY-MM-DD-짧은슬러그.md`로 옮겨 보관하고 표준 빈 템플릿으로 초기화한다.
 
+## 팀 저장소 안내
+
+이 저장소는 GitHub 조직에서 여러 명이 브랜치·PR로 협업한다. `docs/tasks/current.md`·`AGENTS.md`·`docs/RULES.md`·`tools/harness/`는 저장소 소유자 전용이며, 하네스를 쓰는 팀원의 State는 `implemented`까지만 쓰고 그 이후는 GitHub PR 리뷰로 대체한다. PR 생성과 merge는 항상 사람이 직접 한다. 세부 규칙은 `docs/RULES.md`의 "여러 명이 함께 쓸 때 (팀 저장소)"를 따른다.
+
 ## 필수 원칙
 
 - 두 에이전트가 같은 파일을 동시에 수정하지 않는다. 작업 전 파일별 소유자를 정하고, 인계가 필요하면 기존 작업을 중단·동기화한 뒤 소유자를 변경한다.

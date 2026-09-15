@@ -171,3 +171,24 @@ Claude(Reviewer)는 계획 범위 준수나 로직 보존 같은 실질 검토�
 - 작업이 `verified`로 종료되고 다음 작업을 시작할 때, Claude는 종료된 `current.md`의 전체 내용을 `docs/tasks/archive/YYYY-MM-DD-짧은슬러그.md`로 복사해 보관한 뒤 `current.md`를 표준 빈 템플릿(목표·범위·계획 등을 "없음"으로 둔 최초 형태)으로 초기화한다.
 - 이 보관 절차는 2026-09-13 사용자 승인에 따라 **매번 재승인 없이 자동으로 수행한다.** `docs/tasks/archive/`에는 작업 기록만 두며 제품 코드나 실행 스크립트는 두지 않는다. 세부 규칙은 `docs/tasks/archive/README.md`를 따른다.
 - 초기화 직후에는 State와 3개 고정 필드를 비우거나 "없음"으로 표시해, 이전 작업의 값이 새 작업에 남아 있지 않게 한다.
+
+## 여러 명이 함께 쓸 때 (팀 저장소)
+
+이 저장소가 GitHub 조직으로 옮겨지면서 팀원들과 브랜치·PR로 협업한다. 팀원 중 일부는 이 저장소 소유자와 별개로 자기 브랜치에서 Claude/Codex 하네스를 직접 쓸 수 있다. 이때 아래 규칙을 따른다.
+
+### `docs/tasks/current.md`·하네스 문서는 저장소 소유자 전용
+
+- `docs/tasks/current.md`는 저장소 전체에 활성 작업 1개만 담는다는 전제로 설계됐다. `main`에 올라가는 `current.md`는 이 저장소 소유자만 갱신한다.
+- 팀원이 자기 브랜치에서 하네스로 계획·구현을 진행하는 것은 자유지만, **PR을 올릴 때는 `docs/tasks/current.md`를 PR diff에 포함하지 않는다.** PR 직전에 `git checkout main -- docs/tasks/current.md`로 되돌려 실제 코드 변경 파일만 남긴다.
+- `AGENTS.md`, `docs/RULES.md`(이 문서), `tools/harness/`(오케스트레이션 스크립트·스키마)도 마찬가지다 — 팀원 브랜치에서 사전 협의 없이 변경하지 않는다. 이 규칙 자체를 바꾸고 싶으면 저장소 소유자에게 먼저 제안한다.
+
+### 하네스를 쓰는 팀원의 State는 `implemented`까지만
+
+- 팀원의 작업이 PR로 끝나고 `main` 병합은 저장소 소유자가 최종 판단하는 구조에서는, 이 문서가 정의하는 `reviewing`→`approved`→`verified` 절차가 의미가 없다 — 그 역할은 **GitHub PR 리뷰가 대신한다.**
+- 하네스를 쓰는 팀원은 자기 브랜치에서 `planned → implementing → implemented`까지만 사용하고, 그 이후 Claude Reviewer 호출이나 `approved`/`verified` 전환은 하지 않는다. PR을 올린 뒤의 리뷰·승인은 GitHub PR 코멘트/리뷰로 진행한다.
+
+### PR 생성과 병합(merge)은 항상 사람이 직접 수행
+
+- 이 저장소의 오케스트레이션 스크립트와 자동 호출 규칙은 `git commit`/`git push`를 절대 수행하지 않는다는 원칙을 유지해왔다(위 "하네스 사용 시 Reviewer 권한" 참고). 팀 저장소가 된 지금부터 이 원칙을 **PR 생성과 merge**까지 명시적으로 확장한다.
+- Claude/Codex는 어떤 경로로도(대화형이든 하네스 자동 호출이든) `gh pr create`, `gh pr merge`나 GitHub 웹 UI의 merge 버튼에 해당하는 동작을 대신 수행하지 않는다. 이 두 동작은 항상 사람이 직접 GitHub에서 실행한다.
+- 이유: `main`으로 코드가 들어가는 시점은 여러 사람의 작업이 만나는 지점이라, 자동화보다 사람의 최종 확인이 더 중요해지는 지점이다.

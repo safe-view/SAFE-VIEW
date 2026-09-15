@@ -46,13 +46,19 @@ with col2:
     st.markdown("### 시스템 상태")
 
     roi_count = len([f for f in os.listdir(ROI_DIR) if f.endswith(".json")]) if os.path.exists(ROI_DIR) else 0
-    st.metric("저장된 ROI", f"{roi_count}개")
+    with st.container(border=True):
+        st.caption("🗺️ 저장된 ROI")
+        st.markdown(f"### {roi_count}개")
 
     event_count = len([f for f in os.listdir(EVENTS_DIR) if f.endswith(".jpg")]) if os.path.exists(EVENTS_DIR) else 0
-    st.metric("저장된 이벤트 이미지", f"{event_count}개")
+    with st.container(border=True):
+        st.caption("🖼️ 저장된 이벤트 이미지")
+        st.markdown(f"### {event_count}개")
 
     data_count = len([f for f in os.listdir(DATA_DIR) if f.endswith((".mp4", ".avi", ".mov"))]) if os.path.exists(DATA_DIR) else 0
-    st.metric("샘플 영상 파일", f"{data_count}개")
+    with st.container(border=True):
+        st.caption("🎬 샘플 영상 파일")
+        st.markdown(f"### {data_count}개")
 
     st.markdown("---")
     st.markdown("""
@@ -63,4 +69,4 @@ with col2:
     """)
 
 st.markdown("---")
-st.info("💡 **시작 전 확인:** `data/` 폴더에 테스트용 영상 파일(.mp4)을 넣어두세요. YOLOv8 모델은 처음 실행 시 자동으로 다운로드됩니다.")
+st.info("💡 **시작 전 확인:** 테스트용 영상 파일(.mp4)은 미리 `data/` 폴더에 넣어주세요. YOLOv8 모델은 처음 실행할 때 자동으로 다운로드됩니다.")

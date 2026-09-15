@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "base_commit_checked", "scope_ok", "acceptance_criteria", "summary"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["approved", "rejected"],
+      "description": "approved면 State를 approved로, rejected면 implementing으로 되돌린다."
+    },
+    "base_commit_checked": {
+      "type": "string",
+      "description": "리뷰 시점 git rev-parse HEAD 값"
+    },
+    "scope_ok": {
+      "type": "boolean",
+      "description": "계획한 예상 변경 파일 범위만 변경됐는지 (git diff --stat 기준)"
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "description": "계획의 수용 기준 각 항목에 대한 판정",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "result"],
+        "properties": {
+          "criterion": { "type": "string" },
+          "result": { "type": "string", "enum": ["pass", "fail", "not_run"] }
+        }
+      }
+    },
+    "rejection_reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "verdict가 rejected일 때 구체적 반려 사유 목록 (형식 누락 포함)"
+    },
+    "risks_or_followups": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "승인하더라도 남는 위험이나 사용자가 verified 전 확인해야 할 사항"
+    },
+    "summary": {
+      "type": "string",
+      "description": "1~3문장 리뷰 요약. current.md의 '리뷰 및 남은 위험' 섹션에 그대로 기록된다."
+    }
+  },
+  "if": { "properties": { "verdict": { "const": "rejected" } } },
+  "then": {
+    "required": ["rejection_reasons"],
+    "properties": { "rejection_reasons": { "type": "array", "minItems": 1 } }
+  }
+}

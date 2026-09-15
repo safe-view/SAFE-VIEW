@@ -19,9 +19,15 @@ saved_events/_converted/
 Thumbs.db
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/tasks.json
 .idea/
 
 # 환경변수·비밀
 .env
 *.local
+# Runtime-generated files
+streamlit.log
+saved_events/
+# Cloudflare tunnel runtime log
+cloudflared.log

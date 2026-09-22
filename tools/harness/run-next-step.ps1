@@ -286,8 +286,9 @@ try {
     # 6. 핸드오프 형식 최소 검사 (C안) — "구현 결과"/"테스트 결과" 섹션만 검사한다.
     # -----------------------------------------------------------------------
     function Get-SectionText([string]$Text, [string]$Heading) {
-        $startIdx = $Text.IndexOf($Heading)
-        if ($startIdx -lt 0) { return '' }
+        $headingMatch = [regex]::Match($Text, '(?m)^' + [regex]::Escape($Heading) + '\s*$')
+        if (-not $headingMatch.Success) { return '' }
+        $startIdx = $headingMatch.Index
         $afterIdx = $startIdx + $Heading.Length
         $rest = $Text.Substring($afterIdx)
         $m = [regex]::Match($rest, '(?m)^#{2,}\s')
@@ -320,8 +321,9 @@ try {
     }
 
     function Set-SectionBody([string]$Text, [string]$Heading, [string]$NewBody) {
-        $startIdx = $Text.IndexOf($Heading)
-        if ($startIdx -lt 0) { throw "section-not-found: $Heading" }
+        $headingMatch = [regex]::Match($Text, '(?m)^' + [regex]::Escape($Heading) + '\s*$')
+        if (-not $headingMatch.Success) { throw "section-not-found: $Heading" }
+        $startIdx = $headingMatch.Index
         $afterHeadingIdx = $startIdx + $Heading.Length
         $rest = $Text.Substring($afterHeadingIdx)
         $m = [regex]::Match($rest, '(?m)^#{2,}\s')

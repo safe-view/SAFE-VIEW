@@ -149,6 +149,63 @@ try {
     }
 
     # -----------------------------------------------------------------------
+    # 4.5. 예상 밖 변경 사전 체크 (Codex 호출 전에만 수행)
+    #      docs/RULES.md의 "Stale State·불일치 감지" 런타임 산출물 예외와 동일한
+    #      기준을 쓴다 — 확정 런타임 산출물(logs/)만 제외하고, data/·saved_events/는
+    #      이미 gitignore 대상이라 애초에 git status에 나타나지 않으며,
+    #      roi_configs/ 등 나머지 경로는 전부 그대로 검사한다.
+    # -----------------------------------------------------------------------
+    function Get-GitStatusPorcelain {
+        Push-Location $RepoRoot
+        try {
+            $out = (& git status --porcelain 2>$null)
+            if ($null -eq $out) { return @() }
+            return @($out)
+        } finally {
+            Pop-Location
+        }
+    }
+
+    function Get-ExpectedChangedFiles([string]$Text) {
+        $heading = [regex]::Match($Text, '(?m)^##\s*\d*\.?\s*예상 변경 파일\s*$')
+        if (-not $heading.Success) { return @() }
+        $rest = $Text.Substring($heading.Index + $heading.Length)
+        $endMatch = [regex]::Match($rest, '(?m)^##\s')
+        if ($endMatch.Success) { $rest = $rest.Substring(0, $endMatch.Index) }
+        $paths = New-Object System.Collections.Generic.List[string]
+        foreach ($m in [regex]::Matches($rest, '`([^`]+)`')) {
+            $paths.Add($m.Groups[1].Value.Trim())
+        }
+        return $paths
+    }
+
+    function Test-NoUnexpectedChanges {
+        $lines = Get-GitStatusPorcelain
+        $expected = @(Get-ExpectedChangedFiles $content)
+        # current.md는 계획 수립·구현 결과 기록을 위해 매 작업마다 항상 바뀌므로
+        # "예상 변경 파일" 목록 표기 여부와 무관하게 관례적으로 예상된 변경으로 취급한다.
+        $expected += 'docs/tasks/current.md'
+
+        $unexpected = New-Object System.Collections.Generic.List[string]
+        foreach ($line in $lines) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $path = $line.Substring(3).Trim()
+            # 확정 런타임 산출물 예외: logs/ 아래 변경만 제외한다 (docs/RULES.md "Stale
+            # State·불일치 감지" 3항 참고). data/, saved_events/는 이미 gitignore 대상이라
+            # 여기 나타나지 않고, roi_configs/ 등 나머지 경로는 그대로 검사 대상이다.
+            if ($path -match '^logs/') { continue }
+            if ($expected -contains $path) { continue }
+            $unexpected.Add($line)
+        }
+        if ($unexpected.Count -gt 0) {
+            Write-HLog 'STOP' 'unexpected-git-changes: current.md의 "예상 변경 파일" 목록과 logs/ 예외를 벗어난 변경이 있어 Codex를 호출하지 않습니다 (불필요한 호출·토큰 낭비 방지). 아래 변경을 직접 확인하세요.'
+            foreach ($u in $unexpected) { Write-HLog 'INFO' ('  ' + $u) }
+            return $false
+        }
+        return $true
+    }
+
+    # -----------------------------------------------------------------------
     # 5. 외부 프로세스 실행 헬퍼 (timeout + UTF-8 리다이렉트)
     # -----------------------------------------------------------------------
     function Resolve-AgentExe([string]$Name) {
@@ -375,6 +432,7 @@ try {
                 break
             }
             if (-not (Test-BaseCommitFresh)) { $ExitCode = 1; break }
+            if (-not (Test-NoUnexpectedChanges)) { $ExitCode = 0; break }
 
             $codexExe = Resolve-AgentExe 'codex'
             if (-not $codexExe) {

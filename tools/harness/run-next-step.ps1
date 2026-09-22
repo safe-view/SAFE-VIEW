@@ -170,7 +170,7 @@ try {
         $heading = [regex]::Match($Text, '(?m)^##\s*\d*\.?\s*예상 변경 파일\s*$')
         if (-not $heading.Success) { return @() }
         $rest = $Text.Substring($heading.Index + $heading.Length)
-        $endMatch = [regex]::Match($rest, '(?m)^##\s')
+        $endMatch = [regex]::Match($rest, '(?m)^#{2,}\s')
         if ($endMatch.Success) { $rest = $rest.Substring(0, $endMatch.Index) }
         $paths = New-Object System.Collections.Generic.List[string]
         foreach ($m in [regex]::Matches($rest, '`([^`]+)`')) {
@@ -290,7 +290,7 @@ try {
         if ($startIdx -lt 0) { return '' }
         $afterIdx = $startIdx + $Heading.Length
         $rest = $Text.Substring($afterIdx)
-        $m = [regex]::Match($rest, '(?m)^## ')
+        $m = [regex]::Match($rest, '(?m)^#{2,}\s')
         if ($m.Success) { return $rest.Substring(0, $m.Index) }
         return $rest
     }
@@ -324,7 +324,7 @@ try {
         if ($startIdx -lt 0) { throw "section-not-found: $Heading" }
         $afterHeadingIdx = $startIdx + $Heading.Length
         $rest = $Text.Substring($afterHeadingIdx)
-        $m = [regex]::Match($rest, '(?m)^## ')
+        $m = [regex]::Match($rest, '(?m)^#{2,}\s')
         if ($m.Success) {
             $endIdx = $afterHeadingIdx + $m.Index
         } else {

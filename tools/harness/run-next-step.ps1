@@ -1,8 +1,9 @@
 ﻿<#
   Harness: Run Next Step
   ------------------------
-  docs/tasks/current.md의 State를 읽어 정확히 한 단계만 진행하고 종료한다.
-  watch/loop/자동 재시도는 없다. 실패 시 다음 단계로 진행하지 않는다.
+  docs/tasks/current.md의 State를 읽어 성공 시 planned/implementing → implemented → approved까지 연쇄 실행한다.
+  implementing은 완결된 핸드오프 기록이 있을 때만 재개한다.
+  watch/loop/자동 재시도는 없다. 실패·반려 시 즉시 중단한다.
 
   권한:
     - git commit / git push 를 호출하지 않는다 (읽기 전용 git 명령만 사용).
@@ -60,6 +61,7 @@ if (Test-Path $LockPath) {
     $lockInfo = $null
     try { $lockInfo = Read-Utf8File $LockPath } catch { }
     Write-HLog 'STOP' 'already-running: lock file exists.'
+    Write-HLog 'NEXT' '다른 실행이 끝날 때까지 기다리세요. 실행 중인 프로세스가 없음을 확인한 경우에만 남은 lock 파일을 수동 삭제하세요.'
     if ($lockInfo) {
         Write-Output $lockInfo
         if ($lockInfo -match 'pid=(\d+)') {
@@ -78,6 +80,7 @@ try {
     Write-Utf8File $LockPath $lockContent
 } catch {
     Write-HLog 'FAIL' "cannot-create-lock: $($_.Exception.Message)"
+    Write-HLog 'NEXT' '임시 폴더 접근 권한과 lock 경로를 확인한 뒤 다시 실행하세요.'
     exit 1
 }
 
@@ -87,6 +90,7 @@ try {
     # -----------------------------------------------------------------------
     if (-not (Test-Path $CurrentMdPath)) {
         Write-HLog 'FAIL' "current-md-not-found: $CurrentMdPath"
+        Write-HLog 'NEXT' 'docs/tasks/current.md 경로와 계획 파일을 복구한 뒤 다시 실행하세요.'
         exit 1
     }
 
@@ -138,11 +142,13 @@ try {
     function Test-BaseCommitFresh {
         if ([string]::IsNullOrWhiteSpace($BaseCommit) -or $BaseCommit -eq '없음') {
             Write-HLog 'FAIL' 'no-base-commit: 기준 커밋이 없어 신선도를 확인할 수 없습니다.'
+            Write-HLog 'NEXT' 'Planner에게 현재 HEAD와 계획을 확인하고 기준 커밋을 기록하도록 요청하세요.'
             return $false
         }
         $head = Get-CurrentHead
         if ($BaseCommit -ne $head) {
             Write-HLog 'FAIL' "stale: base_commit=$BaseCommit current_head=$head"
+            Write-HLog 'NEXT' 'git log/git diff로 기준 커밋 이후 변경을 확인하고 Planner에게 계획과 기준 커밋 갱신을 요청하세요.'
             return $false
         }
         return $true
@@ -199,6 +205,7 @@ try {
         }
         if ($unexpected.Count -gt 0) {
             Write-HLog 'STOP' 'unexpected-git-changes: current.md의 "예상 변경 파일" 목록과 logs/ 예외를 벗어난 변경이 있어 Codex를 호출하지 않습니다 (불필요한 호출·토큰 낭비 방지). 아래 변경을 직접 확인하세요.'
+            Write-HLog 'NEXT' 'git status/git diff로 아래 변경을 확인하고 계획 범위와 일치하도록 정리한 뒤 다시 실행하세요.'
             foreach ($u in $unexpected) { Write-HLog 'INFO' ('  ' + $u) }
             return $false
         }
@@ -301,11 +308,12 @@ try {
         $test = Get-SectionText $Text '## 테스트 결과'
         $combined = $impl + "`n" + $test
 
-        if ($combined -match [regex]::Escape('(Codex 작성)')) { return $false }
-        if ($combined -notmatch [regex]::Escape('계획 이탈 사항')) { return $false }
-        if ($combined -notmatch [regex]::Escape('종료 시점 git 상태')) { return $false }
-        if ($combined -notmatch '-\s*\[[ xX]\]') { return $false }
-        return $true
+        $missing = @()
+        if ($combined -match [regex]::Escape('(Codex 작성)')) { $missing += '(Codex 작성) placeholder 잔존' }
+        if ($impl -notmatch [regex]::Escape('계획 이탈 사항')) { $missing += '구현 결과: 계획 이탈 사항 없음' }
+        if ($impl -notmatch [regex]::Escape('종료 시점 git 상태')) { $missing += '구현 결과: 종료 시점 git 상태 없음' }
+        if ($test -notmatch '-\s*\[[ xX]\]') { $missing += '테스트 결과: 수용 기준 체크리스트 없음' }
+        return [PSCustomObject]@{ Ok = ($missing.Count -eq 0); Missing = $missing }
     }
 
     # -----------------------------------------------------------------------
@@ -427,20 +435,31 @@ try {
     $ExitCode = 0
 
     switch ($State) {
-        'planned' {
+        { $_ -in 'planned', 'implementing' } {
+            if ($State -eq 'implementing') {
+                $handoff = Test-HandoffFormat $content
+                if (-not $handoff.Ok) {
+                    Write-HLog 'STOP' 'implementing-incomplete-handoff: 이전 시도가 완료되지 않은 채 중단됐을 가능성이 있어 자동 재개하지 않습니다.'
+                    foreach ($item in $handoff.Missing) { Write-HLog 'NEXT' ("기록 확인: $item") }
+                    Write-HLog 'NEXT' 'git status/git diff로 실제 변경을 확인하고 필요시 보완하거나 되돌리세요. 문제없다고 판단하면 State를 planned로 직접 전환한 뒤 재실행하세요.'
+                    exit 0
+                }
+            }
             if ($ApprovalRequired -and -not $ApprovalDone) {
                 Write-HLog 'STOP' 'user-approval-required: 승인 필요 항목이 아직 완료되지 않았습니다.'
+                Write-HLog 'NEXT' '계획에 대한 사용자 승인과 사용자 승인: 완료 기록을 확인한 뒤 다시 실행하세요.'
                 $ExitCode = 0
-                break
+                exit $ExitCode
             }
-            if (-not (Test-BaseCommitFresh)) { $ExitCode = 1; break }
-            if (-not (Test-NoUnexpectedChanges)) { $ExitCode = 0; break }
+            if (-not (Test-BaseCommitFresh)) { $ExitCode = 1; exit $ExitCode }
+            if (-not (Test-NoUnexpectedChanges)) { $ExitCode = 0; exit $ExitCode }
 
             $codexExe = Resolve-AgentExe 'codex'
             if (-not $codexExe) {
                 Write-HLog 'FAIL' 'codex-not-found: PATH 또는 %APPDATA%\npm 에서 codex를 찾을 수 없습니다.'
+                Write-HLog 'NEXT' 'Codex CLI 설치와 PATH를 확인한 뒤 다시 실행하세요.'
                 $ExitCode = 1
-                break
+                exit $ExitCode
             }
 
             $codexArgs = @(
@@ -452,30 +471,46 @@ try {
                 $CodexPrompt
             )
 
-            Write-HLog 'INFO' 'invoking-codex (implementing)'
+            Write-HLog 'RUNNING' "Codex implementing (state=$State)..."
             $result = Invoke-AgentProcess -Exe $codexExe -ArgumentList $codexArgs -TimeoutSec $TimeoutSec
 
             if ($result.TimedOut) {
                 Write-HLog 'FAIL' "codex-timeout: ${TimeoutSec}s 초과. 프로세스를 종료했습니다. 다음 단계로 진행하지 않습니다."
-                $ExitCode = 1
-                break
-            }
-            if (-not $result.Ok) {
-                Write-HLog 'FAIL' ("codex-exit-{0}: 구현이 실패했을 수 있습니다. current.md와 아래 로그를 직접 확인하세요." -f $result.ExitCode)
+                Write-HLog 'NEXT' '아래 임시 로그와 current.md, git diff로 중단된 작업을 확인하세요. implementing 기록이 불완전하면 변경을 정리하고 planned로 직접 전환한 뒤 재실행하세요.'
                 Write-Output ('stdout log: ' + $result.StdOutFile)
                 Write-Output ('stderr log: ' + $result.StdErrFile)
                 $ExitCode = 1
-                break
+                exit $ExitCode
+            }
+            if (-not $result.Ok) {
+                Write-HLog 'FAIL' ("codex-exit-{0}: 구현이 실패했을 수 있습니다. current.md와 아래 로그를 직접 확인하세요." -f $result.ExitCode)
+                Write-HLog 'NEXT' '아래 stdout/stderr 로그와 current.md, git diff로 실패 원인을 확인하세요. implementing 기록이 불완전하면 변경을 정리하고 planned로 직접 전환한 뒤 재실행하세요.'
+                Write-Output ('stdout log: ' + $result.StdOutFile)
+                Write-Output ('stderr log: ' + $result.StdErrFile)
+                $ExitCode = 1
+                exit $ExitCode
             }
 
-            Write-HLog 'OK' 'codex-invoked: Codex 호출이 종료 코드 0으로 완료됐습니다. current.md의 State를 직접 확인하세요.'
-            $ExitCode = 0
+            Write-HLog 'OK' 'codex-invoked: Codex 호출이 종료 코드 0으로 완료됐습니다.'
+            $content = Read-Utf8File $CurrentMdPath
+            $State = ((Get-FieldValue $content 'State') -replace '`', '').Trim()
+            $BaseCommit = ((Get-FieldValue $content '기준 커밋') -replace '`', '').Trim()
+            if ($State -ne 'implemented') {
+                Write-HLog 'STOP' "codex-state-unchanged: Codex가 성공 종료했지만 State가 implemented가 아닙니다 (state=$State)."
+                Write-HLog 'NEXT' 'current.md와 Codex 실행 결과를 확인하고 구현 기록 및 State를 보완하세요.'
+                exit 0
+            }
             break
         }
+    }
 
+    # 직접 implemented로 시작한 경우와 Codex 성공 이후에 같은 리뷰 경로를 사용한다.
+    switch ($State) {
         'implemented' {
-            if (-not (Test-HandoffFormat $content)) {
-                Write-HLog 'STOP' 'handoff-format-incomplete: 계획 이탈 사항/종료 시점 git 상태/수용 기준 체크리스트 중 누락이 있어 Claude를 호출하지 않습니다. Codex 재작업이 필요합니다.'
+            $handoff = Test-HandoffFormat $content
+            if (-not $handoff.Ok) {
+                Write-HLog 'STOP' 'handoff-format-incomplete: 핸드오프 기록이 불완전하여 Claude를 호출하지 않습니다.'
+                foreach ($item in $handoff.Missing) { Write-HLog 'NEXT' ("Codex에게 기록 보완을 요청하세요: $item") }
                 $ExitCode = 0
                 break
             }
@@ -484,6 +519,7 @@ try {
             $claudeExe = Resolve-AgentExe 'claude'
             if (-not $claudeExe) {
                 Write-HLog 'FAIL' 'claude-not-found: PATH 또는 %APPDATA%\npm 에서 claude를 찾을 수 없습니다.'
+                Write-HLog 'NEXT' 'Claude CLI 설치와 PATH를 확인한 뒤 다시 실행하세요.'
                 $ExitCode = 1
                 break
             }
@@ -494,6 +530,7 @@ try {
                 $schemaJson = ($schemaRaw | ConvertFrom-Json | ConvertTo-Json -Depth 10 -Compress)
             } catch {
                 Write-HLog 'FAIL' "schema-read-failed: $($_.Exception.Message)"
+                Write-HLog 'NEXT' 'review-schema.json 경로와 JSON 형식을 확인하고 복구한 뒤 다시 실행하세요.'
                 $ExitCode = 1
                 break
             }
@@ -508,16 +545,20 @@ try {
                 $ReviewPrompt
             )
 
-            Write-HLog 'INFO' 'invoking-claude-reviewer (read-only)'
+            Write-HLog 'RUNNING' 'Claude reviewing...'
             $result = Invoke-AgentProcess -Exe $claudeExe -ArgumentList $claudeArgs -TimeoutSec $TimeoutSec
 
             if ($result.TimedOut) {
                 Write-HLog 'FAIL' "claude-timeout: ${TimeoutSec}s 초과. State를 바꾸지 않습니다."
+                Write-HLog 'NEXT' '아래 임시 로그와 연결 상태를 확인하고 원인을 해결한 뒤 implemented 상태에서 다시 실행하세요.'
+                Write-Output ('stdout log: ' + $result.StdOutFile)
+                Write-Output ('stderr log: ' + $result.StdErrFile)
                 $ExitCode = 1
                 break
             }
             if (-not $result.Ok) {
                 Write-HLog 'FAIL' ("claude-exit-{0}: 리뷰 호출이 실패했습니다. State를 바꾸지 않습니다." -f $result.ExitCode)
+                Write-HLog 'NEXT' '아래 stdout/stderr 로그로 리뷰 호출 실패 원인을 해결한 뒤 다시 실행하세요.'
                 Write-Output ('stdout log: ' + $result.StdOutFile)
                 Write-Output ('stderr log: ' + $result.StdErrFile)
                 $ExitCode = 1
@@ -528,6 +569,7 @@ try {
             try { $envelope = $result.StdOut | ConvertFrom-Json } catch { }
             if ($null -eq $envelope -or $envelope.is_error -eq $true) {
                 Write-HLog 'FAIL' 'claude-response-error: CLI 응답 파싱 실패 또는 is_error=true. State를 바꾸지 않습니다.'
+                Write-HLog 'NEXT' 'CLI 응답과 연결 상태를 확인하고 JSON 응답 오류를 해결한 뒤 다시 실행하세요.'
                 Write-Output ('stdout log: ' + $result.StdOutFile)
                 $ExitCode = 1
                 break
@@ -539,6 +581,7 @@ try {
             $check = Test-ReviewJson $reviewObj $BaseCommit $head
             if (-not $check.Ok) {
                 Write-HLog 'FAIL' ("review-validation-failed:{0}: State를 바꾸지 않습니다. 수동 확인이 필요합니다." -f $check.Reason)
+                Write-HLog 'NEXT' '아래 structured_output과 계획의 기준 커밋을 확인하고 검증 실패 원인을 해결한 뒤 다시 실행하세요.'
                 Write-Output ('raw structured_output: ' + ($reviewObj | ConvertTo-Json -Depth 10 -Compress))
                 $ExitCode = 1
                 break
@@ -549,7 +592,8 @@ try {
                 Write-HLog 'OK' 'review-approved: State를 approved로 갱신했습니다. 사용자 확인(verified) 대기.'
             } else {
                 Update-CurrentMdFromReview $reviewObj 'implementing'
-                Write-HLog 'OK' 'review-rejected: State를 implementing으로 되돌렸습니다. current.md의 반려 사유를 확인하세요.'
+                Write-HLog 'STOP' 'review-rejected: State를 implementing으로 되돌렸습니다. current.md의 반려 사유를 확인하세요.'
+                Write-HLog 'NEXT' 'current.md의 반려 사유와 보완 방향을 확인한 뒤 재실행하세요. 완결된 핸드오프 및 안전장치 검사 후 Codex가 implementing 작업을 재개합니다.'
             }
             $ExitCode = 0
             break

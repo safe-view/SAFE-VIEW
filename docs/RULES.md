@@ -161,7 +161,7 @@ Claude(Reviewer)는 계획 범위 준수나 로직 보존 같은 실질 검토�
 
 1. `기준 커밋`이 현재 `git rev-parse HEAD`와 다르다.
 2. `최종 갱신` 값이 자신이 마지막으로 확인했던 값과 다르다.
-3. `git status`/`git diff` 결과가 `current.md`의 "예상 변경 파일" 또는 "구현 결과"에 없는 변경을 포함한다.
+3. `git status`/`git diff` 결과가 `current.md`의 "예상 변경 파일" 또는 "구현 결과"에 없는 변경을 포함한다. **단, `logs/`(예: `logs/events_log.csv`, `logs/performance_eval.csv`) 아래의 변경은 이 판단에서 제외한다** — 앱을 실행·테스트하기만 해도 자동으로 기록되는 순수 로그라, 계획과 무관하게 항상 바뀔 수 있다. `data/`, `roi_configs/`, `saved_events/`처럼 실제 테스트 자산이나 사용자 설정이 들어가는 경로는 이 예외에 포함하지 않는다 — 이런 경로의 변경은 여전히 예상 밖 변경으로 취급해 멈춘다(`data/`·`saved_events/`는 `.gitignore`로 이미 `git status`에 안 잡히므로 실질적으로는 `roi_configs/`만 이 규칙의 대상이 된다).
 4. `State` 값이 정의된 6개 값 중 하나가 아니거나 필드가 비어 있거나 형식이 깨져 있다.
 5. 이미 다른 에이전트가 진행 중인 파일을 소유권 확인 없이 건드리려 한다.
 

@@ -214,6 +214,7 @@ class AsyncDetectorWorker:
         self._stop_event = threading.Event()
         self._pending_frame = None
         self._latest_detections = []
+        self._last_infer_ms = 0.0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -225,6 +226,11 @@ class AsyncDetectorWorker:
     def get_detections(self):
         with self._lock:
             return list(self._latest_detections)
+
+    def get_infer_ms(self) -> float:
+        """가장 최근 추론 1회에 걸린 시간(ms). 작을수록 박스가 덜 뒤처집니다."""
+        with self._lock:
+            return self._last_infer_ms
 
     def _run(self):
         from core.parked_detector import update as update_parked
@@ -249,6 +255,7 @@ class AsyncDetectorWorker:
                         d["is_parked"] = False
                 with self._lock:
                     self._latest_detections = detections
+                    self._last_infer_ms = getattr(self._detector, "last_infer_ms", 0.0)
             except Exception as e:
                 print(f"[AsyncDetector] 추론 실패: {e}")
 
@@ -507,10 +514,12 @@ with settings_col:
         # placeholder로 만들어 while 루프에서 실시간 갱신
         fps_ph   = st.empty()
         frame_ph_count = st.empty()
+        infer_ph = st.empty()
         fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
         frame_ph_count.markdown(f"**프레임** &nbsp; {st.session_state.frame_idx}")
         st.session_state["__fps_ph"]   = fps_ph
         st.session_state["__frame_ph_count"] = frame_ph_count
+        st.session_state["__infer_ph"] = infer_ph
 
     st.markdown("---")
 
@@ -537,6 +546,9 @@ if start_btn and selected_source:
         if not st.session_state.detector.loaded:
             progress_ph.error(f"❌ 모델 로드 실패: {st.session_state.detector.load_error}")
             st.stop()
+        # OpenVINO를 쓰려다 실패해 기존 모델로 되돌아간 경우 조용히 넘기지 않고 알림
+        if st.session_state.detector.load_warning:
+            st.sidebar.warning(f"⚠️ {st.session_state.detector.load_warning}")
 
     # 비동기 YOLO 워커 생성 (영상 표시와 추론 분리)
     if st.session_state.async_detector is not None:
@@ -783,6 +795,14 @@ while st.session_state.running:
     if "__fps_ph" in st.session_state:
         st.session_state["__fps_ph"].markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
         st.session_state["__frame_ph_count"].markdown(f"**프레임** &nbsp; {frame_idx}")
+        # 추론 지연 — 이 값이 작을수록 검출 박스가 실제 움직임을 덜 뒤처져 따라갑니다
+        if "__infer_ph" in st.session_state and async_worker is not None:
+            infer_ms = async_worker.get_infer_ms()
+            backend = getattr(st.session_state.detector, "backend", "-")
+            st.session_state["__infer_ph"].markdown(
+                f"**추론** &nbsp; {infer_ms:.0f} ms &nbsp;<sub>{backend}</sub>",
+                unsafe_allow_html=True,
+            )
 
     # 비동기 YOLO 워커에 최신 프레임 전달 → 백그라운드에서 추론
     # 메인 루프는 추론을 기다리지 않고 가장 최근 검출 결과를 사용

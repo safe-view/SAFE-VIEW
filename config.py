@@ -25,6 +25,33 @@ ROI_DIR         = os.path.join(BASE_DIR, "roi_configs")
 LOGS_DIR        = os.path.join(BASE_DIR, "logs")
 LOG_FILE        = os.path.join(LOGS_DIR, "events_log.csv")
 
+# ── 추론 백엔드 설정 ───────────────────────────────────
+# 탐지 정확도가 아니라 "프레임당 추론 지연"을 줄이기 위한 설정입니다.
+# 모니터링 화면은 최신 프레임 1장만 남기고 추론하므로, 추론이 빠를수록
+# 검출 박스가 실제 움직임을 덜 뒤처져 따라가고 위험 판정도 더 빨리 나옵니다.
+#
+# 기본값이 "pytorch" 인 이유 — 측정 결과입니다(Intel Core Ultra 5 125H, Windows 11).
+#   PyTorch CPU        60 ms   ← 기준
+#   OpenVINO CPU   95~110 ms   느려짐. ultralytics 가 Windows 에서 OpenVINO CPU
+#                              정밀도를 FP32 로 고정해(nn/backends/openvino.py)
+#                              FP16 내보내기의 이점이 사라집니다.
+#   OpenVINO GPU       25 ms   2.5배 빠름. 단 첫 로드에 커널 컴파일로 40~80초.
+# 즉 CPU에서는 OpenVINO 가 이득이 아니므로 켜지 않는 것이 기본입니다.
+# 자기 PC에서는 `python tools/bench_detector.py` 로 직접 재본 뒤 바꾸세요.
+#
+# "pytorch"  : 기존 동작 (기본값)
+# "openvino" : OpenVINO 사용. 실패하면 .pt 로 폴백하고 경고를 남깁니다.
+# "auto"     : 내보낸 모델이 있고 openvino 가 설치돼 있으면 OpenVINO, 아니면 .pt
+INFER_BACKEND      = "pytorch"
+OPENVINO_MODEL_DIR = os.path.join(BASE_DIR, "yolov8n_openvino_model")
+# OpenVINO 를 쓸 때의 디바이스. 반드시 명시합니다 — ultralytics 기본값 "AUTO" 는
+# 측정에서 직접 지정보다 느렸습니다.
+#   "GPU" : Intel 내장 그래픽. 위 측정에서 유일하게 이득이 난 구성입니다.
+#   "CPU" : 이 프로젝트 측정에서는 PyTorch 보다 느렸습니다.
+#   "NPU" : 지원 안 됨 — dynamic shape 모델을 읽지 못합니다.
+OPENVINO_DEVICE    = "GPU"
+INFER_IMGSZ        = 640           # 추론 입력 해상도 — 내보내기 imgsz와 반드시 일치해야 함
+
 # ── 영상 처리 설정 ─────────────────────────────────────
 FRAME_SKIP      = 2       # N 프레임마다 1번 YOLO 실행 (부하 감소)
 CLIP_PRE_SEC    = 5       # 이벤트 발생 전 몇 초 저장

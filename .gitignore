@@ -31,3 +31,9 @@ streamlit.log
 saved_events/
 # Cloudflare tunnel runtime log
 cloudflared.log
+
+# OpenVINO 내보내기 산출물 (tools/export_openvino.py 로 각자 생성)
+yolov8n_openvino_model/
+
+# Intel GPU 커널 컴파일러가 남기는 진단 덤프 (OpenVINO GPU 사용 시 생성)
+kernel.errors.txt

@@ -240,7 +240,11 @@ class AsyncDetectorWorker:
             try:
                 detections = self._detector.detect(frame, conf=self._conf)
                 car_centers = [d["center"] for d in detections if d["class_name"] == "car"]
-                parked_flags = update_parked(car_centers)
+                car_areas = [
+                    (d["bbox"][2] - d["bbox"][0]) * (d["bbox"][3] - d["bbox"][1])
+                    for d in detections if d["class_name"] == "car"
+                ]
+                parked_flags = update_parked(car_centers, car_areas)
                 car_iter = iter(parked_flags)
                 for d in detections:
                     if d["class_name"] == "car":

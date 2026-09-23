@@ -13,7 +13,7 @@
 - `pages/3_이벤트_다시보기.py`: 이벤트 달력, 이미지·클립 재생 및 삭제
 - `pages/4_성능_평가.py`: 평가 사례 입력과 탐지 지표 표시
 - `core/video_source.py`: OpenCV 기반 로컬 영상·RTSP 읽기와 재연결
-- `core/detector.py`: YOLOv8 객체 탐지 결과를 공통 딕셔너리 형식으로 변환
+- `core/detector.py`: YOLOv8 객체 탐지 결과를 공통 딕셔너리 형식으로 변환. 추론 백엔드는 `config.INFER_BACKEND`로 고르며, OpenVINO로 내보낸 모델이 있으면 그것을, 없으면 기존 `yolov8n.pt`를 쓴다(반환 형식은 동일)
 - `core/parked_detector.py`: 프레임 간 차량 중심점 이동량과 지속 시간으로 정지 차량 판정
 - `core/image_enhancement.py`: 밝기 측정과 CLAHE 저조도 보정
 - `core/roi_manager.py`: ROI JSON 영속화, 점 포함 판정, 프레임 표시

@@ -61,6 +61,32 @@ streamlit run app.py
 
 자동으로 http://localhost:8501 이 열린다.
 
+### 추론 속도 높이기 (선택)
+
+모니터링 화면은 최신 프레임 1장만 남기고 추론하므로, **추론 1회에 걸리는 시간**이 곧 검출 박스가 실제 움직임보다 얼마나 뒤처지는지를 결정한다. 이 시간을 줄이려고 OpenVINO 런타임 경로를 넣어 뒀다.
+
+기본값은 기존과 같은 PyTorch(`INFER_BACKEND = "pytorch"`)다. **측정해 보고 켜야 한다.**
+
+```
+python tools/export_openvino.py     # yolov8n_openvino_model/ 생성 (한 번만)
+python tools/bench_detector.py      # 백엔드별 추론 지연 비교
+python tools/verify_detector.py     # 결과·위험 판정이 그대로인지 검증
+```
+
+Intel Core Ultra 5 125H / Windows 11 에서 측정한 결과는 다음과 같다.
+
+| 구성 | 추론 지연 | PyTorch 대비 |
+|---|---|---|
+| PyTorch (기본값) | 약 60 ms | 기준 |
+| OpenVINO CPU | 95~124 ms | **느려짐** |
+| OpenVINO GPU | 약 25 ms | **2.5배 빠름** (첫 로드 40~80초) |
+
+CPU에서 느린 이유는 ultralytics가 Windows에서 OpenVINO CPU 정밀도를 FP32로 고정하기 때문이다. 쓸 만한 구성은 Intel 내장 그래픽(GPU)뿐이고, 대신 앱을 켤 때마다 커널 컴파일로 40~80초가 걸린다. 상시 감시용이면 켤 만하고, 자주 껐다 켜는 개발·시연 중에는 기본값이 낫다.
+
+켜려면 `config.py`에서 `INFER_BACKEND = "openvino"`, `OPENVINO_DEVICE = "GPU"` 로 바꾼다. `openvino`가 없거나 모델을 내보내지 않았으면 자동으로 `yolov8n.pt`로 되돌아가므로 이 단계를 건너뛰어도 된다. 생성된 모델 폴더는 커밋하지 않는다.
+
+위 수치는 PC 한 대 기준이므로, 자기 PC에서 `tools/bench_detector.py`로 직접 재보고 판단하면 된다.
+
 CCTV를 쓰려면 rtsp_presets.json 파일을 만들어서 RTSP 주소를 등록하면 된다. 형식은 다음과 같다.
 
 ```json
@@ -107,7 +133,7 @@ AI 활용 업무:
 
 주요 라이센스:
 - Ultralytics YOLOv8: AGPL-3.0 (소스 공개 의무)
-- Streamlit, OpenCV, Cloudflare Tunnel: Apache 2.0
+- Streamlit, OpenCV, OpenVINO, Cloudflare Tunnel: Apache 2.0
 - NumPy, pandas: BSD-3-Clause
 - Pillow: HPND
 - streamlit-image-coordinates: MIT

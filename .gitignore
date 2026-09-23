@@ -29,5 +29,6 @@ Thumbs.db
 # Runtime-generated files
 streamlit.log
 saved_events/
+logs/
 # Cloudflare tunnel runtime log
 cloudflared.log

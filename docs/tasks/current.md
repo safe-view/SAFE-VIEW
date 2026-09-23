@@ -7,9 +7,7 @@
 **승인 필요:** 없음
 **최종 갱신:** 없음
 
-새 작업 시작 전 초기화된 표준 빈 템플릿. 직전 작업(대시보드 안내 문구 다듬기 — 하네스 첫 실전 E2E 테스트)은 `verified`로 종료되어 `docs/tasks/archive/2026-09-13-dashboard-info-banner-wording.md`로 보관됐다.
-
-> 이 작업으로 하네스 자동화 경로(Codex 구현 → Harness의 핸드오프 형식 최소 검사 → Claude 읽기 전용 리뷰 → Harness의 제한적 State/리뷰 섹션 갱신)가 처음으로 실전에서 끝까지 성공적으로 동작함을 확인했다.
+새 작업 시작 전 초기화된 표준 빈 템플릿. 직전 작업(정지차량 판정에 바운딩박스 크기 변화 신호 추가 — 후진/원근 방향 이동 차량 오인식 수정)은 `verified`로 종료되어 `docs/tasks/archive/2026-09-23-parked-detector-radial-motion.md`로 보관됐다.
 
 ## 1. 목표
 

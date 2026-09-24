@@ -4,6 +4,9 @@
 # 추론 백엔드는 config.INFER_BACKEND로 고릅니다. OpenVINO로 내보낸 모델이
 # 있으면 그것을 쓰고, 없으면 기존 yolov8n.pt로 그대로 동작합니다.
 # 어느 쪽이든 detect()가 돌려주는 딕셔너리 형식은 동일합니다.
+#
+# config.USE_TRACKER가 켜져 있으면 ByteTrack으로 차량마다 ID를 붙여
+# 'track_id' 키를 함께 돌려줍니다. 추적이 실패한 박스는 None입니다.
 
 import sys
 import os
@@ -14,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     YOLO_MODEL, CONFIDENCE_THRESHOLD, CLASS_IDS, TARGET_CLASS_IDS,
     INFER_BACKEND, OPENVINO_MODEL_DIR, OPENVINO_DEVICE, INFER_IMGSZ,
+    USE_TRACKER, TRACKER_CONFIG,
 )
 
 
@@ -50,6 +54,8 @@ class Detector:
         self.last_infer_ms = 0.0
         self.load_warning = None
         self.load_error = None
+        self.tracking = bool(USE_TRACKER)   # 추적 호출이 실패하면 False 로 내려간다
+        self.track_error = None
 
         # ultralytics 임포트는 여기서 해서 로딩 오류를 한 곳에서 처리
         try:
@@ -122,12 +128,34 @@ class Detector:
         """
         추론 1회. 클래스·신뢰도 필터를 NMS 단계로 내려보내 후처리할 박스 수를 줄입니다.
         (파이썬 쪽 필터는 detect()에 안전망으로 그대로 남아 있습니다.)
+
+        추적이 켜져 있으면 track()으로 호출해 박스마다 ID를 함께 받습니다.
+        추적 호출이 실패하면 경고를 한 번 남기고 이후로는 기존 경로만 씁니다.
         """
         kwargs = {}
         if self.backend == "openvino":
             # 디바이스를 명시하지 않으면 ultralytics 가 "AUTO"를 쓰는데,
             # 측정 결과 AUTO 가 CPU 직접 지정보다 느렸습니다(config 주석 참고).
             kwargs["device"] = f"intel:{self.device.lower()}"
+
+        if self.tracking:
+            try:
+                # persist=True 라야 프레임 사이에 ID가 유지됩니다.
+                return self.model.track(
+                    frame,
+                    persist=True,
+                    tracker=TRACKER_CONFIG,
+                    verbose=False,
+                    imgsz=INFER_IMGSZ,
+                    conf=conf,
+                    classes=TARGET_CLASS_IDS,
+                    **kwargs,
+                )[0]
+            except Exception as e:
+                self.tracking = False
+                self.track_error = str(e)
+                print(f"[Detector] 추적 실패 → 추적 없이 계속합니다: {e}")
+
         return self.model(
             frame,
             verbose=False,
@@ -136,6 +164,20 @@ class Detector:
             classes=TARGET_CLASS_IDS,
             **kwargs,
         )[0]
+
+    def reset_tracker(self):
+        """
+        추적 상태를 비웁니다. 모니터링을 껐다 켤 때 이전 세션의 ID가
+        남아 새 영상의 차량과 섞이지 않게 합니다.
+        """
+        if not self.loaded:
+            return
+        try:
+            predictor = getattr(self.model, "predictor", None)
+            for tracker in getattr(predictor, "trackers", []) or []:
+                tracker.reset()
+        except Exception as e:
+            print(f"[Detector] 추적기 초기화 건너뜀: {e}")
 
     def detect(self, frame, conf: float = CONFIDENCE_THRESHOLD) -> list[dict]:
         """
@@ -149,6 +191,7 @@ class Detector:
             'bbox':          (x1,y1,x2,y2),
             'center':        (cx, cy),   # 박스 중심점
             'bottom_center': (cx, y2),   # 박스 하단 중심점 (발 위치)
+            'track_id':      int|None,   # 추적 ID (추적이 꺼졌거나 실패하면 None)
         }
         """
         if not self.loaded:
@@ -167,6 +210,8 @@ class Detector:
             cls_id = int(box.cls[0])
             if cls_id not in TARGET_CLASS_IDS:
                 continue
+            # 추적을 켜도 신뢰도가 낮은 프레임에서는 ID가 안 붙을 수 있습니다.
+            track_id = int(box.id[0]) if getattr(box, "id", None) is not None else None
             confidence = float(box.conf[0])
             if confidence < conf:
                 continue
@@ -188,6 +233,7 @@ class Detector:
                 "bbox":          (x1, y1, x2, y2),
                 "center":        (cx, cy),
                 "bottom_center": (cx, y2),   # 발 위치로 ROI 판단에 사용
+                "track_id":      track_id,   # 정지차량 판정에서 같은 차를 잇는 데 사용
             })
 
         return detections

@@ -117,9 +117,81 @@ def seq_moving(seconds: float) -> list:
             for i in range(int(seconds * FPS))]
 
 
+def seq_parked_with_gaps(seconds: float) -> list:
+    """정지 차량인데 YOLO 가 주기적으로 놓치는 경우.
+
+    실제 영상에서 관찰된 상황입니다 — 야간·가림 때문에 검출이 끊기면 슬롯이
+    만료되고 "10초간 정지" 이력이 날아가, 판정이 됐다 풀렸다 합니다.
+    추적 ID가 있으면 끊겨도 같은 차로 이어져야 합니다.
+    """
+    out = []
+    for i in range(int(seconds * FPS)):
+        # 6초 주기로 6초 동안 검출 안 됨 (SLOT_EXPIRE_SEC 5초를 넘긴다)
+        if (i // int(6 * FPS)) % 2 == 1:
+            out.append(None)
+        else:
+            out.append(((100, 200), BASE_AREA))
+    return out
+
+
+def run_two_ids(seq: list) -> dict:
+    """같은 자리에 ID만 바뀐 차가 오면 새 슬롯으로 시작하는지 확인."""
+    clock = _FakeClock()
+    original_time = pd.time
+    pd.time = clock
+    try:
+        pd.reset()
+        half = len(seq) // 2
+        for center, area in seq[:half]:
+            clock.advance()
+            pd.update([center], [area], [1])
+        before = pd.update([seq[half][0]], [seq[half][1]], [1])
+        # 같은 좌표인데 ID만 2로 바뀐다
+        after = None
+        for center, area in seq[half:half + int(3 * FPS)]:
+            clock.advance()
+            after = pd.update([center], [area], [2])
+        was_parked = bool(before and before[0])
+        now_parked = bool(after and after[0])
+        return {
+            "restarted": was_parked and not now_parked,
+            "detail": f"ID 1 일 때 {was_parked} → ID 2 로 바뀐 직후 {now_parked}",
+        }
+    finally:
+        pd.time = original_time
+
+
+def check_expire_crash() -> tuple:
+    """이슈 #15 — SLOT_EXPIRE_SEC 이 이력 보관 기준보다 길 때 죽지 않아야 한다."""
+    clock = _FakeClock()
+    original_time = pd.time
+    original_expire = pd.SLOT_EXPIRE_SEC
+    pd.time = clock
+    pd.SLOT_EXPIRE_SEC = 20.0
+    try:
+        pd.reset()
+        for _ in range(int(1 * FPS)):        # 차 1대를 잠깐 보여주고
+            clock.advance()
+            pd.update([(100, 100)], [BASE_AREA])
+        for _ in range(int(40 * FPS)):       # 그 차가 사라진 채로 시간만 흐른다
+            clock.advance()
+            pd.update([(900, 900)], [BASE_AREA])
+        return True, "40초 동안 예외 없음"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        pd.time = original_time
+        pd.SLOT_EXPIRE_SEC = original_expire
+
+
 # ══════════════════════════════════════════════════════
-def run(seq: list) -> dict:
-    """시퀀스를 흘려보내고 (최초 판정 시각, 판정 비율, 마지막 상태)를 돌려줍니다."""
+def run(seq: list, track_id=None) -> dict:
+    """시퀀스를 흘려보내고 (최초 판정 시각, 판정 비율, 마지막 상태)를 돌려줍니다.
+
+    seq 의 각 항목이 (center, area) 면 차량 1대가 계속 보이는 경우이고,
+    None 이면 그 프레임에서 차량이 검출되지 않은 것으로 다룹니다.
+    track_id 를 주면 추적 ID 경로로, 주지 않으면 기존 거리 매칭 경로로 돕니다.
+    """
     clock = _FakeClock()
     original_time = pd.time
     pd.time = clock
@@ -128,9 +200,15 @@ def run(seq: list) -> dict:
         first = None
         hits = 0
         last = False
-        for center, area in seq:
+        for item in seq:
             clock.advance()
-            flags = pd.update([center], [area])
+            if item is None:                      # 검출이 끊긴 프레임
+                pd.update([], [], [] if track_id is not None else None)
+                last = False
+                continue
+            center, area = item
+            ids = [track_id] if track_id is not None else None
+            flags = pd.update([center], [area], ids)
             last = bool(flags and flags[0])
             if last:
                 hits += 1
@@ -185,6 +263,24 @@ def main() -> int:
     e = run(seq_moving(120))
     check("E. 이동 차량(중심점 이동) → 정지차량으로 판정 안 됨",
           e["first"] is None, fmt(e))
+
+    # ── 추적 ID 경로 ────────────────────────────────────────────────
+    # F. 검출이 중간중간 끊겨도 같은 ID면 정지 이력이 이어져야 한다.
+    #    ID가 없으면(거리 매칭) 슬롯이 만료돼 이력이 날아가고 판정이 깜빡인다.
+    gap = seq_parked_with_gaps(120)
+    f_id = run(gap, track_id=7)
+    f_no = run(gap)
+    check("F. 검출이 끊겨도 같은 ID면 이력 유지",
+          f_id["first"] is not None and f_id["pct"] > f_no["pct"],
+          f"ID 있음 {fmt(f_id)} / ID 없음 {fmt(f_no)}")
+
+    # G. 같은 자리라도 ID가 다르면 다른 차 → 이력이 이어지면 안 된다
+    g = run_two_ids(seq_parked(120))
+    check("G. 같은 위치라도 ID가 바뀌면 새 차로 취급",
+          g["restarted"], g["detail"])
+
+    # H. 이슈 #15 — SLOT_EXPIRE_SEC 을 늘려도 크래시하지 않아야 한다
+    check("H. SLOT_EXPIRE_SEC=20 에서 크래시 없음", *check_expire_crash())
 
     print("\n" + ("전부 PASS" if not _fails else f"FAIL {len(_fails)}건: {_fails}"))
     return 1 if _fails else 0

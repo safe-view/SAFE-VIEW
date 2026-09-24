@@ -164,9 +164,16 @@ try {
     function Get-GitStatusPorcelain {
         Push-Location $RepoRoot
         try {
-            $out = (& git status --porcelain 2>$null)
+            $out = (& git status --porcelain -z 2>$null)
             if ($null -eq $out) { return @() }
-            return @($out)
+            $tokens = ($out -join "`n").Split([char]0)
+            for ($i = 0; $i -lt $tokens.Count; $i++) {
+                $entry = $tokens[$i]
+                if ($entry.Length -eq 0) { continue }
+                $entry
+                # With -z, rename/copy records contain destination then source.
+                if ($entry.Substring(0, 2) -match '[RC]') { $i++ }
+            }
         } finally {
             Pop-Location
         }
@@ -195,7 +202,7 @@ try {
         $unexpected = New-Object System.Collections.Generic.List[string]
         foreach ($line in $lines) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $path = $line.Substring(3).Trim()
+            $path = $line.Substring(3)
             # 확정 런타임 산출물 예외: logs/ 아래 변경만 제외한다 (docs/RULES.md "Stale
             # State·불일치 감지" 3항 참고). data/, saved_events/는 이미 gitignore 대상이라
             # 여기 나타나지 않고, roi_configs/ 등 나머지 경로는 그대로 검사 대상이다.

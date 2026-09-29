@@ -7,6 +7,7 @@ OpenVINO 백엔드는 "같은 결과를 더 빨리" 내는 것이 목적이므�
     A4 — 위험 판정 6개 사례가 기존과 같은 답을 내는가
     A5 — 워밍업 덕분에 첫 프레임에서 멈추지 않는가
     A8 — detect() 반환 딕셔너리 형식이 그대로인가
+         (`track_id` 는 추적 도입 때 추가된 키로, 추적이 꺼져 있으면 None)
 
     python tools/verify_detector.py
 
@@ -26,7 +27,8 @@ import config
 from core.danger_logic import check_danger
 from core.detector import Detector
 
-DETECT_KEYS = {"class_id", "class_name", "confidence", "bbox", "center", "bottom_center"}
+DETECT_KEYS = {"class_id", "class_name", "confidence", "bbox", "center",
+               "bottom_center", "track_id"}
 _fails: list[str] = []
 
 

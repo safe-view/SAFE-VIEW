@@ -250,7 +250,9 @@ class AsyncDetectorWorker:
                     (d["bbox"][2] - d["bbox"][0]) * (d["bbox"][3] - d["bbox"][1])
                     for d in detections if d["class_name"] == "car"
                 ]
-                parked_flags = update_parked(car_centers, car_areas)
+                car_ids = [d.get("track_id") for d in detections
+                           if d["class_name"] == "car"]
+                parked_flags = update_parked(car_centers, car_areas, car_ids)
                 car_iter = iter(parked_flags)
                 for d in detections:
                     if d["class_name"] == "car":
@@ -340,6 +342,10 @@ def stop_all():
     st.session_state.video_total_paused = 0.0
     st.session_state.video_pause_start  = 0.0
     reset_parked()   # 정지 차량 판단 이력 초기화
+    # 추적 ID도 함께 비운다 — 안 비우면 이전 세션의 차량 ID가 새 영상에 섞인다
+    detector = st.session_state.get("detector")
+    if detector is not None:
+        detector.reset_tracker()
 
 
 # ══════════════════════════════════════════════════════

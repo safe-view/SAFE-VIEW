@@ -52,6 +52,19 @@ OPENVINO_MODEL_DIR = os.path.join(BASE_DIR, "yolov8n_openvino_model")
 OPENVINO_DEVICE    = "GPU"
 INFER_IMGSZ        = 640           # 추론 입력 해상도 — 내보내기 imgsz와 반드시 일치해야 함
 
+# ── 차량 추적 설정 ─────────────────────────────────────
+# ByteTrack 으로 차량마다 ID를 붙입니다. 정지차량 판정은 "이 차가 10초간
+# 안 움직였나"를 봐야 하는데, ID가 없으면 검출이 한 번 끊길 때마다 그 이력이
+# 사라져 판정이 깜빡입니다.
+#
+# 측정(시나리오1 351프레임): 추론 지연 45.9ms → 47.1ms (+2.6%) 로 비용이 거의
+# 없고, 상위 ID는 351프레임 내내 끊기지 않았습니다. OpenVINO 백엔드에서도
+# 동작합니다. BoT-SORT 는 +55% 인데 ID 품질 차이가 없어 쓰지 않습니다.
+#
+# False 로 두면 추적 없이 기존 거리 기반 매칭으로 동작합니다.
+USE_TRACKER        = True
+TRACKER_CONFIG     = "bytetrack.yaml"   # ultralytics 에 동봉된 설정
+
 # ── 영상 처리 설정 ─────────────────────────────────────
 FRAME_SKIP      = 2       # N 프레임마다 1번 YOLO 실행 (부하 감소)
 CLIP_PRE_SEC    = 5       # 이벤트 발생 전 몇 초 저장

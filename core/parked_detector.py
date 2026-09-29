@@ -2,7 +2,8 @@
 #
 # 동작 원리 (AI 추적 알고리즘 없이 좌표 비교만 사용):
 #   1. 매 프레임마다 감지된 차량의 위치를 기록
-#   2. 비슷한 위치에 있는 차량은 같은 차량으로 간주 (단순 거리 매칭)
+#   2. 추적 ID(ByteTrack)가 오면 그 ID로 같은 차량을 잇고, ID가 없으면
+#      비슷한 위치에 있는 차량을 같은 차량으로 간주 (단순 거리 매칭)
 #   3. 1~2개 샘플의 잡음은 무시하고, 3개 연속 이탈로 실제 움직임을 확인
 #      박스 크기 변화는 같은 방향으로 3연속이어야 움직임으로 본다 — 다가오거나
 #      멀어지는 차는 한 방향으로 꾸준히 변하고, 검출 잡음은 위아래로 진동한다
@@ -42,6 +43,12 @@ REFERENCE_SAMPLES = 5  # 기준점의 중앙값에서 최대 2개 잡음을 완�
 AREA_CHANGE_RATIO = 0.35
 MOVE_THRESHOLD_PX  = 30.0    # 이 거리 이내로만 움직이면 "정지"로 봄
 SLOT_EXPIRE_SEC    = 5.0     # 이 시간 동안 안 보이면 슬롯 삭제 (메모리 정리)
+# 추적 ID가 붙은 슬롯은 더 오래 살려 둔다.
+# ID가 없으면 "비슷한 위치"로만 같은 차를 판단하므로, 오래 붙들고 있으면 엉뚱한
+# 차가 그 슬롯을 물려받을 위험이 커서 5초가 적절하다. 반면 ID가 있으면 다시
+# 나타났을 때 같은 차임을 확실히 알 수 있어, 잠깐 가려졌다고 "10초간 정지"
+# 이력을 버릴 이유가 없다. 이 이력이 날아가는 것이 판정이 깜빡이던 원인이었다.
+TRACKED_SLOT_EXPIRE_SEC = 30.0
 
 
 def _distance(p1, p2) -> float:
@@ -72,36 +79,62 @@ def _area_change_direction(reference: float, area: float) -> int:
     return 1 if area > reference else -1
 
 
-def update(car_centers: list[tuple], car_areas: list[float]) -> list[bool]:
+def update(car_centers: list[tuple], car_areas: list[float],
+           car_ids: list | None = None) -> list[bool]:
     """
     현재 프레임의 차량 중심 좌표 리스트를 받아,
     각 차량이 "정지 상태"인지 여부를 같은 순서의 리스트로 반환합니다.
 
     car_centers: [(cx, cy), (cx, cy), ...]  현재 프레임의 모든 차량 중심점
     car_areas: 중심점과 같은 순서의 바운딩박스 면적 리스트
+    car_ids: 같은 순서의 추적 ID 리스트 (없으면 None, 개별 항목도 None 가능)
     반환: [True/False, True/False, ...]      각 차량의 정지 여부
+
+    추적 ID가 오면 거리와 무관하게 같은 ID의 슬롯을 잇습니다. 검출이 한두
+    프레임 끊겨도 "10초간 정지" 이력이 살아남아 판정이 덜 깜빡입니다.
+    ID가 없는 차량(추적 미사용이거나 그 프레임에서 ID를 못 받은 경우)은
+    기존 거리 기반 매칭으로 처리합니다.
     """
     now = time.time()
     matched_slots = set()
     results = [False] * len(car_centers)
+    ids = list(car_ids) if car_ids is not None else [None] * len(car_centers)
 
-    # 1) 현재 프레임의 각 차량을 가장 가까운 기존 슬롯과 매칭
+    # 1) 현재 프레임의 각 차량을 기존 슬롯과 매칭
+    #    추적 ID가 있으면 ID 우선, 없으면 가장 가까운 슬롯
     for idx, center in enumerate(car_centers):
         best_slot_idx = -1
-        best_distance = MATCH_DISTANCE_PX
+        track_id = ids[idx] if idx < len(ids) else None
 
-        for s_idx, slot in enumerate(_slots):
-            if s_idx in matched_slots:
-                continue   # 이미 다른 차량에 매칭된 슬롯은 건너뜀
-            last_pos = slot["positions"][-1][1]
-            dist = _distance(last_pos, center)
-            if dist < best_distance:
-                best_distance = dist
-                best_slot_idx = s_idx
+        if track_id is not None:
+            for s_idx, slot in enumerate(_slots):
+                if s_idx in matched_slots:
+                    continue
+                if slot.get("track_id") == track_id:
+                    best_slot_idx = s_idx
+                    break
+
+        best_distance = MATCH_DISTANCE_PX
+        if best_slot_idx < 0:
+            for s_idx, slot in enumerate(_slots):
+                if s_idx in matched_slots:
+                    continue   # 이미 다른 차량에 매칭된 슬롯은 건너뜀
+                # ID가 붙은 슬롯은 다른 ID의 차량이 거리로 가로채지 못하게 한다
+                if track_id is not None and slot.get("track_id") is not None:
+                    continue
+                if not slot["positions"]:
+                    continue   # 이력이 모두 잘려나간 슬롯은 건너뜀
+                last_pos = slot["positions"][-1][1]
+                dist = _distance(last_pos, center)
+                if dist < best_distance:
+                    best_distance = dist
+                    best_slot_idx = s_idx
 
         if best_slot_idx >= 0:
             # 기존 슬롯에 매칭 → 위치 추가
             slot = _slots[best_slot_idx]
+            if track_id is not None:
+                slot["track_id"] = track_id   # 거리로 찾은 슬롯에도 ID를 새겨 둔다
             slot["positions"].append((now, center))
             area = car_areas[idx]
             slot["areas"].append((now, area))
@@ -153,6 +186,7 @@ def update(car_centers: list[tuple], car_areas: list[float]) -> list[bool]:
         else:
             # 새 슬롯 생성
             _slots.append({
+                "track_id": track_id,
                 "positions": [(now, center)],
                 "areas": [(now, car_areas[idx])],
                 "last_seen": now,
@@ -166,10 +200,20 @@ def update(car_centers: list[tuple], car_areas: list[float]) -> list[bool]:
             # 새 차량은 당연히 정지 아님
 
     # 2) 오래된 슬롯 정리 (메모리 누수 방지)
-    _slots[:] = [s for s in _slots if now - s["last_seen"] <= SLOT_EXPIRE_SEC]
+    #    추적 ID가 있는 슬롯은 다시 만났을 때 같은 차임을 알 수 있으므로 더 오래 둔다
+    _slots[:] = [
+        s for s in _slots
+        if now - s["last_seen"] <= (TRACKED_SLOT_EXPIRE_SEC
+                                    if s.get("track_id") is not None
+                                    else SLOT_EXPIRE_SEC)
+    ]
 
     # 3) 각 슬롯의 위치 이력 중 너무 오래된 것은 잘라냄
-    cutoff = now - (STATIONARY_SECONDS * 1.5)
+    #    슬롯이 살아있는 동안(SLOT_EXPIRE_SEC)은 이력도 남겨야 한다 —
+    #    만료 기준이 더 길면 이력만 전부 잘려 positions 가 빈 슬롯이 생기고,
+    #    다음 프레임의 positions[-1] 접근에서 IndexError 로 죽는다(이슈 #15).
+    cutoff = now - max(STATIONARY_SECONDS * 1.5,
+                       SLOT_EXPIRE_SEC, TRACKED_SLOT_EXPIRE_SEC)
     for slot in _slots:
         slot["positions"] = [(t, p) for t, p in slot["positions"] if t >= cutoff]
         slot["areas"] = [(t, a) for t, a in slot["areas"] if t >= cutoff]

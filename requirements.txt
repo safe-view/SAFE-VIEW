@@ -7,3 +7,5 @@ streamlit-image-coordinates>=0.1.0
 pandas>=1.5.0
 imageio-ffmpeg>=0.4.0
 openvino>=2024.0            # YOLO 추론 가속 (없으면 자동으로 yolov8n.pt 로 폴백)
+lap>=0.5.12                 # ByteTrack 추적기가 쓰는 선형 할당
+scipy>=1.11.0               # ByteTrack 의존

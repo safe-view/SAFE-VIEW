@@ -415,7 +415,12 @@ try {
     # -----------------------------------------------------------------------
     # 8. 고정 프롬프트 (짧게 유지 — current.md를 source of truth로 우선한다)
     # -----------------------------------------------------------------------
-    $CodexPrompt = 'docs/tasks/current.md 한 파일을 읽고 그 계획대로 구현하라. ' +
+    $CodexPrompt = '중요: PowerShell에서 파일을 읽을 때 `Get-Content`를 인코딩 지정 없이 쓰면 ' +
+        'Windows PowerShell 5.1(powershell.exe) 기본 동작상 이 저장소의 UTF-8(BOM 없음) 한글 텍스트가 깨져서 읽힌다. ' +
+        '파일 내용을 셸 명령으로 읽어야 한다면 반드시 `Get-Content -Raw -Encoding utf8 -LiteralPath <path>` 또는 ' +
+        '`[System.IO.File]::ReadAllText("<path>", [System.Text.Encoding]::UTF8)` 처럼 UTF-8을 명시하라. ' +
+        '가능하면 셸 대신 파일을 직접 여는 도구(있다면)를 우선 사용하라. ' +
+        'docs/tasks/current.md 한 파일을 읽고 그 계획대로 구현하라. ' +
         'AGENTS.md와 docs/RULES.md의 규칙은 이미 계획에 반영돼 있으니 필요할 때만 참고하고 처음부터 다시 해석하지 마라. ' +
         'docs/PRODUCT.md/docs/ARCHITECTURE.md는 계획에 없는 배경지식이 꼭 필요할 때만 읽어라. ' +
         '계획에 명시된 파일만 최소 범위로 수정하라. ' +

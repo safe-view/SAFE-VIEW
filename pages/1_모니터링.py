@@ -78,9 +78,10 @@ st.markdown("""
         50% { opacity: 0.6; text-shadow: none; }
     }
     .status-box-danger {
-        background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%);
-        padding: 25px 20px; border-radius: 15px; text-align: center;
-        border: 4px solid #ef4444; animation: pulse-danger 1s infinite;
+        background: linear-gradient(135deg, #450A0A 0%, #7F1D1D 100%);
+        padding: 26px 20px; border-radius: 16px; text-align: center;
+        border: 3px solid #EF4444; animation: pulse-danger 1s infinite;
+        box-shadow: 0 12px 28px rgba(220, 38, 38, .2);
     }
     .danger-title {
         color: #f87171; margin: 0; font-size: 1.8rem; font-weight: 900;
@@ -90,13 +91,19 @@ st.markdown("""
     .danger-sub { color: #fca5a5; margin: 5px 0 0; font-size: 1.1rem; font-weight: bold; }
     
     .status-box-safe {
-        background: linear-gradient(135deg, #022c22 0%, #064e3b 100%);
-        padding: 25px 20px; border-radius: 15px; text-align: center;
-        border: 2px solid #10b981;
+        background: linear-gradient(135deg, #022C22 0%, #064E3B 100%);
+        padding: 26px 20px; border-radius: 16px; text-align: center;
+        border: 2px solid #10B981;
+        box-shadow: 0 12px 28px rgba(16, 185, 129, .14);
     }
     /* 정상 글씨가 눈에 확 띄도록 밝은 초록색과 굵기 추가 */
     .safe-title { color: #4ade80 !important; margin: 0; font-size: 2.2rem; font-weight: 900; }
     .safe-sub { color: #a7f3d0 !important; margin: 5px 0 0; font-size: 1.1rem; font-weight: bold; }
+    [data-testid="stImage"] {
+        overflow: hidden; border-radius: 14px; border: 1px solid #CBD5E1;
+        background: #0B1220; box-shadow: 0 10px 28px rgba(15, 23, 42, .14);
+    }
+    [data-testid="stProgress"] > div > div { background-color: #38BDF8; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -417,12 +424,18 @@ def stop_all():
 # 진행상황 메시지 표시 영역 (배너 바로 아래, 제목 위)
 progress_ph = st.empty()
 
-st.title("🎥 실시간 모니터링")
+st.markdown("""
+<div style="margin-bottom:1.2rem;">
+    <h1 style="color:#0F172A; font-size:2.2rem; font-weight:800; margin-bottom:.2rem;">🎥 실시간 모니터링</h1>
+    <p style="color:#64748B; margin:0;">영상 소스를 분석하고 관심구역의 위험 상태를 실시간으로 확인합니다.</p>
+</div>
+""", unsafe_allow_html=True)
 
 settings_col, main_col, status_col = st.columns([1, 2.5, 1])
 
 # ── 왼쪽: 영상 소스 설정 ──────────────────────────────
 with settings_col:
+    st.markdown('<span class="sv-source-panel-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
     st.markdown("### 영상 소스 설정")
     source_type = st.radio("소스", ["📁 파일", "📡 RTSP"], horizontal=True, disabled=st.session_state.running, label_visibility="collapsed")
     selected_source, source_label, source_ready = None, "", False
@@ -571,31 +584,6 @@ with settings_col:
 
     st.markdown("---")
 
-    # 시스템 상태
-    st.markdown("### 시스템 상태")
-    roi_polygon = load_roi(source_label) if source_label else None
-    if roi_polygon is not None:
-        st.success(f"✅ ROI 로드됨 ({len(roi_polygon)}개) — `{source_label}`")
-    else:
-        st.warning(f"⚠️ '{source_label}' ROI 미설정")
-        saved_list = list_saved_rois()
-        if saved_list:
-            st.caption("저장된 ROI : " + ", ".join(f"`{s}`" for s in saved_list))
-            st.caption("→ ROI 설정 페이지에서 같은 이름으로 다시 저장하거나 파일명을 일치시키세요.")
-
-    if st.session_state.running:
-        # placeholder로 만들어 while 루프에서 실시간 갱신
-        fps_ph   = st.empty()
-        frame_ph_count = st.empty()
-        infer_ph = st.empty()
-        fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
-        frame_ph_count.markdown(f"**프레임** &nbsp; {st.session_state.frame_idx}")
-        st.session_state["__fps_ph"]   = fps_ph
-        st.session_state["__frame_ph_count"] = frame_ph_count
-        st.session_state["__infer_ph"] = infer_ph
-
-    st.markdown("---")
-
     # 감지 신뢰도는 내부 기본값 사용 (UI 숨김)
     conf_threshold = 0.4
 
@@ -608,6 +596,14 @@ with settings_col:
         help="저조도 환경에서 영상을 자동으로 밝게 보정합니다",
     )
     st.session_state.enhance_mode = enhance_mode
+
+    st.markdown("---")
+
+    # 패널의 마지막에는 실시간 FPS만 간결하게 표시
+    st.markdown("### 시스템 상태")
+    fps_ph = st.empty()
+    fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
+    st.session_state["__fps_ph"] = fps_ph
 
 # ══════════════════════════════════════════════════════
 # 시작/정지 처리
@@ -864,20 +860,10 @@ while st.session_state.running:
     # "OFF" 면 그대로 통과
 
     st.session_state.frame_idx += 1
-    frame_idx = st.session_state.frame_idx
     update_fps()
-    # 사이드바 FPS/프레임 표시 갱신
+    # 소스 설정 패널의 FPS 표시 갱신
     if "__fps_ph" in st.session_state:
         st.session_state["__fps_ph"].markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
-        st.session_state["__frame_ph_count"].markdown(f"**프레임** &nbsp; {frame_idx}")
-        # 추론 지연 — 이 값이 작을수록 검출 박스가 실제 움직임을 덜 뒤처져 따라갑니다
-        if "__infer_ph" in st.session_state and async_worker is not None:
-            infer_ms = async_worker.get_infer_ms()
-            backend = getattr(st.session_state.detector, "backend", "-")
-            st.session_state["__infer_ph"].markdown(
-                f"**추론** &nbsp; {infer_ms:.0f} ms &nbsp;<sub>{backend}</sub>",
-                unsafe_allow_html=True,
-            )
 
     # 비동기 YOLO 워커에 최신 프레임 전달 → 백그라운드에서 추론
     # 메인 루프는 추론을 기다리지 않고 가장 최근 검출 결과를 사용
@@ -919,8 +905,12 @@ while st.session_state.running:
         # 가장자리 빨간색 두꺼운 테두리
         cv2.rectangle(annotated, (0, 0), (annotated.shape[1], annotated.shape[0]), (0, 0, 255), 25)
         
-        # 화면 상단(Y: 50) 정중앙에 "경고" 아주 굵고 크게(160) 출력
-        annotated = draw_text_korean_centered(annotated, "경고", 50, 160, (0, 0, 255))
+        # 위험 판정 조건은 그대로 두고, 공개 경고 화면 톤의 큰 외곽선 문구만 표시
+        warning_y = max(40, int(annotated.shape[0] * 0.16))
+        warning_size = max(72, min(150, int(annotated.shape[1] * 0.12)))
+        annotated = draw_text_korean_centered(
+            annotated, "보행자 위험", warning_y, warning_size, (0, 0, 255)
+        )
 
     # ── 이벤트 저장 ──────────────────────────────────────
     if event_triggered and not st.session_state.post_recording:

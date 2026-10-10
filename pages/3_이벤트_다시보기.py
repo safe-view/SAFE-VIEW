@@ -23,7 +23,7 @@ from core.event_saver import delete_event
 st.markdown("""
     <style>
     /* 1. 전체 배경색: 맥북 스타일의 아주 연한 회색 */
-    .stApp { background-color: #F4F7F9; font-family: 'Pretendard', sans-serif; }
+    .stApp { background-color: #F1F5F9; font-family: 'Noto Sans KR', sans-serif; }
     
     /* 2. 상단 여백 다이어트 */
     .block-container { padding-top: 2rem !important; padding-bottom: 2rem !important; }

@@ -602,8 +602,8 @@ with settings_col:
     # 패널의 마지막에는 실시간 FPS만 간결하게 표시
     st.markdown("### 시스템 상태")
     fps_ph = st.empty()
-    fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
-    st.session_state["__fps_ph"] = fps_ph
+    if not st.session_state.running:
+        fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
 
 # ══════════════════════════════════════════════════════
 # 시작/정지 처리
@@ -677,6 +677,7 @@ if stop_btn:
 # 영상/상태 플레이스홀더 (위에서 만든 columns 사용)
 # ══════════════════════════════════════════════════════
 with main_col:
+    st.markdown('<span class="sv-video-progress-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
     frame_ph = st.empty()
     info_ph  = st.empty()
     ctrl_box = st.empty()          # 재생/정지 + 시크 슬라이더
@@ -862,8 +863,7 @@ while st.session_state.running:
     st.session_state.frame_idx += 1
     update_fps()
     # 소스 설정 패널의 FPS 표시 갱신
-    if "__fps_ph" in st.session_state:
-        st.session_state["__fps_ph"].markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
+    fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
 
     # 비동기 YOLO 워커에 최신 프레임 전달 → 백그라운드에서 추론
     # 메인 루프는 추론을 기다리지 않고 가장 최근 검출 결과를 사용

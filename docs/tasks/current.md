@@ -7,7 +7,7 @@
 **승인 필요:** 없음
 **최종 갱신:** 없음
 
-새 작업 시작 전 초기화된 표준 빈 템플릿. 직전 작업("UI/UX 디자인 통일 — 1단계(비주얼)")은 `verified`로 종료되어 `docs/tasks/archive/2026-10-10-uiux-design-phase1-verified.md`로 보관됐다. 다음 단계(2단계: `st.cache_resource` 공유 자원 구조 전환 + 공개 디스플레이 전용 페이지 신설)는 별도 계획으로 진행한다.
+새 작업 시작 전 초기화된 표준 빈 템플릿. 직전 작업("모니터링 페이지 버튼/라디오 다듬기")은 `verified`로 종료되어 `docs/tasks/archive/2026-10-10-monitoring-polish-verified.md`로 보관됐다. 다음 단계(2단계: `st.cache_resource` 공유 자원 구조 전환 + 공개 디스플레이 전용 페이지 신설)는 사용자 승인 대기 중이다.
 
 ## 1. 목표
 

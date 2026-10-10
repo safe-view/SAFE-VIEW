@@ -215,6 +215,13 @@ class AsyncDetectorWorker:
         self._pending_frame = None
         self._latest_detections = []
         self._last_infer_ms = 0.0
+        self._motion_lock = threading.Lock()
+        self._prev_gray = None
+        self._shake_x = 0.0
+        self._shake_y = 0.0
+        self._motion_scale = 0.125
+        self._motion_interval = 3
+        self._motion_frame_count = 0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -232,6 +239,13 @@ class AsyncDetectorWorker:
         with self._lock:
             return self._last_infer_ms
 
+    def reset_motion_compensation(self):
+        with self._motion_lock:
+            self._prev_gray = None
+            self._shake_x = 0.0
+            self._shake_y = 0.0
+            self._motion_frame_count = 0
+
     def _run(self):
         from core.parked_detector import update as update_parked
         while not self._stop_event.is_set():
@@ -245,6 +259,51 @@ class AsyncDetectorWorker:
                 continue
             try:
                 detections = self._detector.detect(frame, conf=self._conf)
+                with self._motion_lock:
+                    estimate_motion = (
+                        self._prev_gray is None
+                        or self._motion_frame_count % self._motion_interval == 0
+                    )
+                    self._motion_frame_count += 1
+                    if estimate_motion:
+                        current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        current_gray = cv2.resize(
+                            current_gray,
+                            None,
+                            fx=self._motion_scale,
+                            fy=self._motion_scale,
+                            interpolation=cv2.INTER_AREA,
+                        )
+                    if (estimate_motion and self._prev_gray is not None
+                            and self._prev_gray.shape == current_gray.shape):
+                        prev_points = cv2.goodFeaturesToTrack(
+                            self._prev_gray,
+                            maxCorners=30,
+                            qualityLevel=0.01,
+                            minDistance=5,
+                            blockSize=7,
+                        )
+                        if prev_points is not None:
+                            current_points, status, _ = cv2.calcOpticalFlowPyrLK(
+                                self._prev_gray, current_gray, prev_points, None
+                            )
+                            if current_points is not None and status is not None:
+                                tracked = status.reshape(-1) == 1
+                                if np.any(tracked):
+                                    displacement = (
+                                        current_points[tracked] - prev_points[tracked]
+                                    ).reshape(-1, 2)
+                                    dx, dy = np.median(displacement, axis=0)
+                                    dx = float(dx) / self._motion_scale
+                                    dy = float(dy) / self._motion_scale
+                                    if math.hypot(dx, dy) <= 40.0:
+                                        self._shake_x += dx
+                                        self._shake_y += dy
+                    if estimate_motion:
+                        self._prev_gray = current_gray
+                    shake_x = self._shake_x
+                    shake_y = self._shake_y
+
                 car_centers = [d["center"] for d in detections if d["class_name"] == "car"]
                 car_areas = [
                     (d["bbox"][2] - d["bbox"][0]) * (d["bbox"][3] - d["bbox"][1])
@@ -252,7 +311,11 @@ class AsyncDetectorWorker:
                 ]
                 car_ids = [d.get("track_id") for d in detections
                            if d["class_name"] == "car"]
-                parked_flags = update_parked(car_centers, car_areas, car_ids)
+                corrected_centers = [
+                    (x - shake_x, y - shake_y)
+                    for x, y in car_centers
+                ]
+                parked_flags = update_parked(corrected_centers, car_areas, car_ids)
                 car_iter = iter(parked_flags)
                 for d in detections:
                     if d["class_name"] == "car":
@@ -751,6 +814,8 @@ while st.session_state.running:
         st.session_state.seek_target = None
         st.session_state.frame_buffer.clear()
         reset_parked()
+        if async_worker is not None:
+            async_worker.reset_motion_compensation()
 
     # 일시정지 (파일 모드만 의미 있음)
     if st.session_state.paused and not is_rtsp:

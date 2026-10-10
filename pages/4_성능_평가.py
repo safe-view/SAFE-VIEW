@@ -14,9 +14,22 @@ from core.performance_eval import (
     add_record, load_records, delete_record, compute_metrics, CATEGORIES,
 )
 
-st.title("📊 시스템 성능 평가")
-st.caption("KISA 지능형 CCTV 성능시험 인증제도 평가 방식 참고")
-st.markdown("---")
+st.markdown("""
+<style>
+.eval-heading h1 { color:#0F172A; font-size:2.2rem; font-weight:800; margin-bottom:.2rem; }
+.eval-heading p { color:#64748B; font-size:1rem; margin:0 0 1.5rem; }
+[data-testid="stForm"] { padding:1.25rem; box-shadow:0 5px 18px rgba(15,23,42,.05); }
+[data-testid="stDataFrame"] { border:1px solid #E2E8F0; border-radius:14px; overflow:hidden; }
+[data-testid="stTextInput"] input, [data-baseweb="select"] > div,
+[data-testid="stNumberInput"] input, [data-testid="stTextArea"] textarea {
+    border-color:#CBD5E1 !important; border-radius:10px !important;
+}
+</style>
+<div class="eval-heading">
+    <h1>📊 시스템 성능 평가</h1>
+    <p>KISA 지능형 CCTV 성능시험 인증제도 평가 방식을 참고한 정량 성능 기록입니다.</p>
+</div>
+""", unsafe_allow_html=True)
 
 # session_state 초기화
 if "eval_added_msg" not in st.session_state:

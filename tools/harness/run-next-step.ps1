@@ -223,10 +223,39 @@ try {
     # 5. 외부 프로세스 실행 헬퍼 (timeout + UTF-8 리다이렉트)
     # -----------------------------------------------------------------------
     function Resolve-AgentExe([string]$Name) {
+        # npm 전역 설치 CLI(codex/claude)는 보통 .cmd 배치 셔임으로 resolve된다.
+        # Start-Process가 -RedirectStandard* 를 쓰면 UseShellExecute=false로
+        # CreateProcess를 직접 호출하는데, CreateProcess는 .cmd/.bat를 셀 없이
+        # 실행할 수 없어 "The system cannot find the file specified."로 조용히
+        # 실패한다(종료 코드 1, stdout/stderr 거의 비어있음). cmd.exe /c 로
+        # 감싸는 방법은 인자가 여러 개면 cmd의 "맨 앞/뒤가 둘 다 "면 그 한 겹만
+        # 벗겨낸다"는 인용 규칙이 깨져 신뢰할 수 없으므로, .cmd 셔임이 실제로
+        # 호출하는 node.exe + 진짜 스크립트(.js) 경로를 셔임 파일에서 직접 찾아
+        # 셔임 자체를 건너뛴다.
         $npmCmd = Join-Path $env:APPDATA ("npm\{0}.cmd" -f $Name)
-        if (Test-Path $npmCmd) { return $npmCmd }
+        if (Test-Path $npmCmd) {
+            $npmDir  = Split-Path $npmCmd -Parent
+            $nodeExe = Join-Path $npmDir 'node.exe'
+            if (-not (Test-Path $nodeExe)) {
+                $nodeCmd = Get-Command 'node' -ErrorAction SilentlyContinue
+                $nodeExe = if ($nodeCmd) { $nodeCmd.Source } else { $null }
+            }
+            $shimText = $null
+            try { $shimText = [System.IO.File]::ReadAllText($npmCmd) } catch { }
+            if ($nodeExe -and $shimText) {
+                $m = [regex]::Match($shimText, '%dp0%\\([^"]+\.js)')
+                if ($m.Success) {
+                    $scriptPath = Join-Path $npmDir $m.Groups[1].Value
+                    if (Test-Path $scriptPath) {
+                        return [PSCustomObject]@{ Exe = $nodeExe; PrependArgs = @($scriptPath) }
+                    }
+                }
+            }
+            # 셔임 파싱에 실패하면 .cmd 자체를 돌려준다(예전 동작 — 단순 호출에서만 동작).
+            return [PSCustomObject]@{ Exe = $npmCmd; PrependArgs = @() }
+        }
         $cmd = Get-Command $Name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
+        if ($cmd) { return [PSCustomObject]@{ Exe = $cmd.Source; PrependArgs = @() } }
         return $null
     }
 
@@ -415,7 +444,12 @@ try {
     # -----------------------------------------------------------------------
     # 8. 고정 프롬프트 (짧게 유지 — current.md를 source of truth로 우선한다)
     # -----------------------------------------------------------------------
-    $CodexPrompt = 'docs/tasks/current.md 한 파일을 읽고 그 계획대로 구현하라. ' +
+    $CodexPrompt = '중요: PowerShell에서 파일을 읽을 때 `Get-Content`를 인코딩 지정 없이 쓰면 ' +
+        'Windows PowerShell 5.1(powershell.exe) 기본 동작상 이 저장소의 UTF-8(BOM 없음) 한글 텍스트가 깨져서 읽힌다. ' +
+        '파일 내용을 셸 명령으로 읽어야 한다면 반드시 `Get-Content -Raw -Encoding utf8 -LiteralPath <path>` 또는 ' +
+        '`[System.IO.File]::ReadAllText("<path>", [System.Text.Encoding]::UTF8)` 처럼 UTF-8을 명시하라. ' +
+        '가능하면 셸 대신 파일을 직접 여는 도구(있다면)를 우선 사용하라. ' +
+        'docs/tasks/current.md 한 파일을 읽고 그 계획대로 구현하라. ' +
         'AGENTS.md와 docs/RULES.md의 규칙은 이미 계획에 반영돼 있으니 필요할 때만 참고하고 처음부터 다시 해석하지 마라. ' +
         'docs/PRODUCT.md/docs/ARCHITECTURE.md는 계획에 없는 배경지식이 꼭 필요할 때만 읽어라. ' +
         '계획에 명시된 파일만 최소 범위로 수정하라. ' +
@@ -469,7 +503,7 @@ try {
                 exit $ExitCode
             }
 
-            $codexArgs = @(
+            $codexArgs = @($codexExe.PrependArgs) + @(
                 '-a', 'never',
                 'exec',
                 '-C', $RepoRoot,
@@ -479,7 +513,7 @@ try {
             )
 
             Write-HLog 'RUNNING' "Codex implementing (state=$State)..."
-            $result = Invoke-AgentProcess -Exe $codexExe -ArgumentList $codexArgs -TimeoutSec $TimeoutSec
+            $result = Invoke-AgentProcess -Exe $codexExe.Exe -ArgumentList $codexArgs -TimeoutSec $TimeoutSec
 
             if ($result.TimedOut) {
                 Write-HLog 'FAIL' "codex-timeout: ${TimeoutSec}s 초과. 프로세스를 종료했습니다. 다음 단계로 진행하지 않습니다."
@@ -542,7 +576,7 @@ try {
                 break
             }
 
-            $claudeArgs = @(
+            $claudeArgs = @($claudeExe.PrependArgs) + @(
                 '-p',
                 '--permission-mode', 'plan',
                 '--allowedTools', 'Read,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git rev-parse:*),Bash(git log:*)',
@@ -553,7 +587,7 @@ try {
             )
 
             Write-HLog 'RUNNING' 'Claude reviewing...'
-            $result = Invoke-AgentProcess -Exe $claudeExe -ArgumentList $claudeArgs -TimeoutSec $TimeoutSec
+            $result = Invoke-AgentProcess -Exe $claudeExe.Exe -ArgumentList $claudeArgs -TimeoutSec $TimeoutSec
 
             if ($result.TimedOut) {
                 Write-HLog 'FAIL' "claude-timeout: ${TimeoutSec}s 초과. State를 바꾸지 않습니다."

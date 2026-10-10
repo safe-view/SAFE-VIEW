@@ -35,8 +35,24 @@ if not LIB_OK:
     )
     st.stop()
 
-st.title("🗺️ ROI 영역 설정")
-st.markdown("---")
+st.markdown("""
+<style>
+.roi-heading h1 { color:#0F172A; font-size:2.2rem; font-weight:800; margin-bottom:.2rem; }
+.roi-heading p { color:#64748B; font-size:1rem; margin:0 0 1.5rem; }
+[data-testid="stFileUploader"], [data-testid="stImage"] {
+    background:#FFFFFF; border:1px solid #E2E8F0; border-radius:14px;
+    padding:.65rem; box-shadow:0 4px 16px rgba(15,23,42,.04);
+}
+[data-testid="stTextInput"] input, [data-baseweb="select"] > div {
+    border-color:#CBD5E1 !important; border-radius:10px !important;
+}
+div[role="radiogroup"] { background:#E2E8F0; padding:4px 8px; border-radius:10px; }
+</style>
+<div class="roi-heading">
+    <h1>🗺️ ROI 영역 설정</h1>
+    <p>영상에서 위험을 감시할 관심구역을 직접 지정하고 소스별로 저장합니다.</p>
+</div>
+""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════
 # session_state 초기화
@@ -89,6 +105,7 @@ settings_col, canvas_col = st.columns([1, 2.5])
 
 # ── 왼쪽: 소스 선택 + ROI 저장 설정 ───────────────────
 with settings_col:
+    st.markdown('<span class="sv-source-panel-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
     # 소스 선택 카드
     st.markdown("### 소스 선택")
     source_type = st.radio("영상 소스", ["📁 파일", "📡 RTSP"], horizontal=True, label_visibility="collapsed")

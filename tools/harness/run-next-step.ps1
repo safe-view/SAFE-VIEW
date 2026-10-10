@@ -247,11 +247,26 @@ try {
         $stdinFile  = Join-Path $env:TEMP ("harness_{0}_in.txt" -f $token)
         Write-Utf8File $stdinFile ''
 
-        $argString = ($ArgumentList | ForEach-Object { Format-ProcArg $_ }) -join ' '
+        # npm 전역 설치 CLI(codex/claude)는 .cmd 배치 셔임으로 resolve되는 경우가 많다.
+        # Start-Process가 -RedirectStandard* 를 쓰면 UseShellExecute=false로 CreateProcess를
+        # 직접 호출하는데, CreateProcess는 .cmd/.bat를 셀 없이 직접 실행할 수 없어
+        # "The system cannot find the file specified." 로 조용히 실패한다(종료 코드 1,
+        # stdout/stderr 거의 비어있음). cmd.exe /c 로 감싸서 우회한다.
+        $runExe = $Exe
+        $runArgString = ($ArgumentList | ForEach-Object { Format-ProcArg $_ }) -join ' '
+        if ($Exe -match '\.(cmd|bat)$') {
+            # cmd.exe /c는 전체 커맨드라인의 맨 앞/뒤가 둘 다 "로 시작·끝나면 그 한 겹만
+            # 벗겨내는 특수 규칙이 있다. 내부 인자들이 각각 이미 "로 감싸져 있어 전체
+            # 문자열도 "로 시작·끝나므로, 한 겹 더 감싸 cmd가 벗겨낼 "가짜 바깥 겹"을
+            # 하나 더 줘야 내부 인용이 그대로 보존된다.
+            $runExe = 'cmd.exe'
+            $inner  = (Format-ProcArg $Exe) + ' ' + $runArgString
+            $runArgString = '/d /c "' + $inner + '"'
+        }
 
         $proc = $null
         try {
-            $proc = Start-Process -FilePath $Exe -ArgumentList $argString `
+            $proc = Start-Process -FilePath $runExe -ArgumentList $runArgString `
                 -NoNewWindow -PassThru `
                 -RedirectStandardOutput $stdoutFile `
                 -RedirectStandardError $stderrFile `

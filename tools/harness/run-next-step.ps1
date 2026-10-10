@@ -223,10 +223,39 @@ try {
     # 5. 외부 프로세스 실행 헬퍼 (timeout + UTF-8 리다이렉트)
     # -----------------------------------------------------------------------
     function Resolve-AgentExe([string]$Name) {
+        # npm 전역 설치 CLI(codex/claude)는 보통 .cmd 배치 셔임으로 resolve된다.
+        # Start-Process가 -RedirectStandard* 를 쓰면 UseShellExecute=false로
+        # CreateProcess를 직접 호출하는데, CreateProcess는 .cmd/.bat를 셀 없이
+        # 실행할 수 없어 "The system cannot find the file specified."로 조용히
+        # 실패한다(종료 코드 1, stdout/stderr 거의 비어있음). cmd.exe /c 로
+        # 감싸는 방법은 인자가 여러 개면 cmd의 "맨 앞/뒤가 둘 다 "면 그 한 겹만
+        # 벗겨낸다"는 인용 규칙이 깨져 신뢰할 수 없으므로, .cmd 셔임이 실제로
+        # 호출하는 node.exe + 진짜 스크립트(.js) 경로를 셔임 파일에서 직접 찾아
+        # 셔임 자체를 건너뛴다.
         $npmCmd = Join-Path $env:APPDATA ("npm\{0}.cmd" -f $Name)
-        if (Test-Path $npmCmd) { return $npmCmd }
+        if (Test-Path $npmCmd) {
+            $npmDir  = Split-Path $npmCmd -Parent
+            $nodeExe = Join-Path $npmDir 'node.exe'
+            if (-not (Test-Path $nodeExe)) {
+                $nodeCmd = Get-Command 'node' -ErrorAction SilentlyContinue
+                $nodeExe = if ($nodeCmd) { $nodeCmd.Source } else { $null }
+            }
+            $shimText = $null
+            try { $shimText = [System.IO.File]::ReadAllText($npmCmd) } catch { }
+            if ($nodeExe -and $shimText) {
+                $m = [regex]::Match($shimText, '%dp0%\\([^"]+\.js)')
+                if ($m.Success) {
+                    $scriptPath = Join-Path $npmDir $m.Groups[1].Value
+                    if (Test-Path $scriptPath) {
+                        return [PSCustomObject]@{ Exe = $nodeExe; PrependArgs = @($scriptPath) }
+                    }
+                }
+            }
+            # 셔임 파싱에 실패하면 .cmd 자체를 돌려준다(예전 동작 — 단순 호출에서만 동작).
+            return [PSCustomObject]@{ Exe = $npmCmd; PrependArgs = @() }
+        }
         $cmd = Get-Command $Name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
+        if ($cmd) { return [PSCustomObject]@{ Exe = $cmd.Source; PrependArgs = @() } }
         return $null
     }
 
@@ -247,26 +276,11 @@ try {
         $stdinFile  = Join-Path $env:TEMP ("harness_{0}_in.txt" -f $token)
         Write-Utf8File $stdinFile ''
 
-        # npm 전역 설치 CLI(codex/claude)는 .cmd 배치 셔임으로 resolve되는 경우가 많다.
-        # Start-Process가 -RedirectStandard* 를 쓰면 UseShellExecute=false로 CreateProcess를
-        # 직접 호출하는데, CreateProcess는 .cmd/.bat를 셀 없이 직접 실행할 수 없어
-        # "The system cannot find the file specified." 로 조용히 실패한다(종료 코드 1,
-        # stdout/stderr 거의 비어있음). cmd.exe /c 로 감싸서 우회한다.
-        $runExe = $Exe
-        $runArgString = ($ArgumentList | ForEach-Object { Format-ProcArg $_ }) -join ' '
-        if ($Exe -match '\.(cmd|bat)$') {
-            # cmd.exe /c는 전체 커맨드라인의 맨 앞/뒤가 둘 다 "로 시작·끝나면 그 한 겹만
-            # 벗겨내는 특수 규칙이 있다. 내부 인자들이 각각 이미 "로 감싸져 있어 전체
-            # 문자열도 "로 시작·끝나므로, 한 겹 더 감싸 cmd가 벗겨낼 "가짜 바깥 겹"을
-            # 하나 더 줘야 내부 인용이 그대로 보존된다.
-            $runExe = 'cmd.exe'
-            $inner  = (Format-ProcArg $Exe) + ' ' + $runArgString
-            $runArgString = '/d /c "' + $inner + '"'
-        }
+        $argString = ($ArgumentList | ForEach-Object { Format-ProcArg $_ }) -join ' '
 
         $proc = $null
         try {
-            $proc = Start-Process -FilePath $runExe -ArgumentList $runArgString `
+            $proc = Start-Process -FilePath $Exe -ArgumentList $argString `
                 -NoNewWindow -PassThru `
                 -RedirectStandardOutput $stdoutFile `
                 -RedirectStandardError $stderrFile `
@@ -489,7 +503,7 @@ try {
                 exit $ExitCode
             }
 
-            $codexArgs = @(
+            $codexArgs = @($codexExe.PrependArgs) + @(
                 '-a', 'never',
                 'exec',
                 '-C', $RepoRoot,
@@ -499,7 +513,7 @@ try {
             )
 
             Write-HLog 'RUNNING' "Codex implementing (state=$State)..."
-            $result = Invoke-AgentProcess -Exe $codexExe -ArgumentList $codexArgs -TimeoutSec $TimeoutSec
+            $result = Invoke-AgentProcess -Exe $codexExe.Exe -ArgumentList $codexArgs -TimeoutSec $TimeoutSec
 
             if ($result.TimedOut) {
                 Write-HLog 'FAIL' "codex-timeout: ${TimeoutSec}s 초과. 프로세스를 종료했습니다. 다음 단계로 진행하지 않습니다."
@@ -562,7 +576,7 @@ try {
                 break
             }
 
-            $claudeArgs = @(
+            $claudeArgs = @($claudeExe.PrependArgs) + @(
                 '-p',
                 '--permission-mode', 'plan',
                 '--allowedTools', 'Read,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git rev-parse:*),Bash(git log:*)',
@@ -573,7 +587,7 @@ try {
             )
 
             Write-HLog 'RUNNING' 'Claude reviewing...'
-            $result = Invoke-AgentProcess -Exe $claudeExe -ArgumentList $claudeArgs -TimeoutSec $TimeoutSec
+            $result = Invoke-AgentProcess -Exe $claudeExe.Exe -ArgumentList $claudeArgs -TimeoutSec $TimeoutSec
 
             if ($result.TimedOut) {
                 Write-HLog 'FAIL' "claude-timeout: ${TimeoutSec}s 초과. State를 바꾸지 않습니다."

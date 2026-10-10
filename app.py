@@ -177,6 +177,10 @@ h1, h2, h3 {{ color: var(--sv-navy); letter-spacing: -0.025em; }}
 .sv-source-panel-marker {{ display: none; }}
 [data-testid="stElementContainer"]:has(.sv-source-panel-marker) {{ display: none; }}
 
+[data-testid="stColumn"]:has(.sv-source-panel-marker) [data-testid="stElementContainer"]:has([data-testid="stRadio"] div[role="radiogroup"][aria-label="소스"]),
+[data-testid="stColumn"]:has(.sv-source-panel-marker) [data-testid="stRadio"]:has(div[role="radiogroup"][aria-label="소스"]) {{
+    width: 100% !important;
+}}
 [data-testid="stRadio"] div[role="radiogroup"] {{
     width: 100%;
     gap: 4px;
@@ -252,6 +256,12 @@ h1, h2, h3 {{ color: var(--sv-navy); letter-spacing: -0.025em; }}
     color: #082F49 !important;
     background: var(--sv-blue) !important;
     border-color: var(--sv-blue) !important;
+}}
+.sv-video-progress-marker {{ display: none; }}
+[data-testid="stElementContainer"]:has(.sv-video-progress-marker) {{ display: none; }}
+[data-testid="stColumn"]:has(.sv-video-progress-marker) [data-testid="stProgress"] > div:first-child,
+[data-testid="stColumn"]:has(.sv-video-progress-marker) [data-testid="stProgress"] > div:first-child * {{
+    background: transparent !important;
 }}
 [data-testid="stButton"] > button:not([kind="primary"]),
 [data-testid="stFormSubmitButton"] > button:not([kind="primary"]) {{

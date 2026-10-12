@@ -3,7 +3,8 @@
 # 사용 흐름:
 #   1. 영상 소스 선택 → 첫 프레임 불러오기
 #   2. 영상 위에 마우스로 클릭 → 꼭짓점 추가
-#   3. 꼭짓점 3개 이상 → 💾 ROI 저장 클릭
+#   3. 꼭짓점 3개 이상 → (구역이 더 필요하면 ➕ 구역 확정 후 다음 구역 그리기)
+#   4. 💾 ROI 저장 클릭
 
 import streamlit as st
 import cv2
@@ -18,7 +19,7 @@ if ROOT not in sys.path:
 
 from config import DATA_DIR
 from core.video_source import VideoSource
-from core.roi_manager  import save_roi, load_roi, list_saved_rois, delete_roi
+from core.roi_manager  import save_roi, load_rois, list_saved_rois, delete_roi
 
 try:
     from streamlit_image_coordinates import streamlit_image_coordinates
@@ -57,17 +58,23 @@ div[role="radiogroup"] { background:#E2E8F0; padding:4px 8px; border-radius:10px
 # ══════════════════════════════════════════════════════
 # session_state 초기화
 # ══════════════════════════════════════════════════════
-if "roi_points"   not in st.session_state: st.session_state.roi_points   = []
+if "roi_points"   not in st.session_state: st.session_state.roi_points   = []   # 지금 그리는 구역
+if "roi_polygons" not in st.session_state: st.session_state.roi_polygons = []   # 확정된 구역들
 if "roi_frame"    not in st.session_state: st.session_state.roi_frame    = None
 if "last_click"   not in st.session_state: st.session_state.last_click   = None
 if "roi_src_label" not in st.session_state: st.session_state.roi_src_label = ""
+if "roi_click_ver" not in st.session_state: st.session_state.roi_click_ver = 0
 
 # ══════════════════════════════════════════════════════
 # 헬퍼
 # ══════════════════════════════════════════════════════
 DISPLAY_W = 800
 
-def render_frame(frame_bgr, points: list, scale: float) -> Image.Image:
+# 확정된 구역별 색상 (RGB) — 지금 그리는 구역은 기존 청록색
+ZONE_COLORS = [(255, 170, 0), (80, 160, 255), (200, 100, 255), (255, 90, 160)]
+DRAW_COLOR  = (0, 255, 180)
+
+def render_frame(frame_bgr, points: list, scale: float, polygons: list = None) -> Image.Image:
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(rgb)
     orig_h, orig_w = frame_bgr.shape[:2]
@@ -75,20 +82,31 @@ def render_frame(frame_bgr, points: list, scale: float) -> Image.Image:
     disp_h = int(orig_h * scale)
     pil = pil.resize((disp_w, disp_h), Image.LANCZOS)
 
-    if not points:
+    if not points and not polygons:
         return pil
 
-    draw = ImageDraw.Draw(pil)
-    disp_pts = [(int(x * scale), int(y * scale)) for x, y in points]
+    draw = ImageDraw.Draw(pil, "RGBA")
 
-    if len(disp_pts) >= 3:
-        draw.polygon(disp_pts, fill=(0, 255, 180, 60), outline=(0, 255, 180))
-    for i in range(len(disp_pts) - 1):
-        draw.line([disp_pts[i], disp_pts[i+1]], fill=(0, 255, 180), width=2)
-    for i, (px, py) in enumerate(disp_pts):
-        r = 7
-        draw.ellipse([(px-r, py-r), (px+r, py+r)], fill=(255, 80, 80), outline="white")
-        draw.text((px + 9, py - 8), f"P{i+1}", fill="white")
+    # 확정된 구역
+    for z, poly in enumerate(polygons or []):
+        color = ZONE_COLORS[z % len(ZONE_COLORS)]
+        disp_poly = [(int(x * scale), int(y * scale)) for x, y in poly]
+        draw.polygon(disp_poly, fill=color + (60,), outline=color + (255,))
+        draw.line(disp_poly + [disp_poly[0]], fill=color + (255,), width=2)
+        lx, ly = disp_poly[0]
+        draw.text((lx + 9, ly - 8), f"ROI{z + 1}", fill="white")
+
+    # 지금 그리는 구역
+    if points:
+        disp_pts = [(int(x * scale), int(y * scale)) for x, y in points]
+        if len(disp_pts) >= 3:
+            draw.polygon(disp_pts, fill=DRAW_COLOR + (60,), outline=DRAW_COLOR)
+        for i in range(len(disp_pts) - 1):
+            draw.line([disp_pts[i], disp_pts[i+1]], fill=DRAW_COLOR, width=2)
+        for i, (px, py) in enumerate(disp_pts):
+            r = 7
+            draw.ellipse([(px-r, py-r), (px+r, py+r)], fill=(255, 80, 80), outline="white")
+            draw.text((px + 9, py - 8), f"P{i+1}", fill="white")
     return pil
 
 def get_video_files() -> list:
@@ -186,9 +204,11 @@ with settings_col:
             vs    = VideoSource(selected_source)
             frame = vs.get_first_frame()
         if frame is not None:
-            st.session_state.roi_frame  = frame
-            st.session_state.roi_points = []
-            st.session_state.last_click = None
+            st.session_state.roi_frame    = frame
+            st.session_state.roi_points   = []
+            st.session_state.roi_polygons = []
+            st.session_state.last_click   = None
+            st.session_state.roi_click_ver += 1   # 클릭 컴포넌트의 이전 클릭 값 버리기
             h, w = frame.shape[:2]
             st.success(f"✅ 완료 ({w}×{h})")
         else:
@@ -208,31 +228,62 @@ with settings_col:
     )
     st.session_state.roi_src_label = label_input
 
-    pts = st.session_state.roi_points
+    pts      = st.session_state.roi_points
+    polygons = st.session_state.roi_polygons
+    # 저장 대상: 확정된 구역 + 지금 그리는 구역(꼭짓점 3개 이상일 때)
+    zone_count = len(polygons) + (1 if len(pts) >= 3 else 0)
+
+    if st.button(
+        f"➕ 구역 확정 / 다음 구역 (ROI{len(polygons) + 1})",
+        use_container_width=True,
+        disabled=len(pts) < 3,
+        help="도로 양쪽처럼 떨어진 구역이 더 있으면, 지금 구역을 확정하고 다음 구역을 그립니다.",
+    ):
+        st.session_state.roi_polygons.append(list(pts))
+        st.session_state.roi_points = []
+        st.rerun()
 
     bc1, bc2 = st.columns(2)
     if bc1.button("↩️ 마지막 취소", use_container_width=True):
         if pts:
             st.session_state.roi_points.pop()
             st.session_state.last_click = None
+            st.session_state.roi_click_ver += 1   # 클릭 컴포넌트의 이전 클릭 값 버리기
+        elif polygons:
+            # 그리던 구역이 없으면 마지막 확정 구역을 다시 편집 상태로
+            st.session_state.roi_points = st.session_state.roi_polygons.pop()
+            st.session_state.last_click = None
+            st.session_state.roi_click_ver += 1   # 클릭 컴포넌트의 이전 클릭 값 버리기
         st.rerun()
     if bc2.button("🗑️ 전체 초기화", use_container_width=True):
-        st.session_state.roi_points = []
-        st.session_state.last_click = None
+        st.session_state.roi_points   = []
+        st.session_state.roi_polygons = []
+        st.session_state.last_click   = None
+        st.session_state.roi_click_ver += 1   # 클릭 컴포넌트의 이전 클릭 값 버리기
         st.rerun()
 
     save_clicked = st.button(
-        f"💾 ROI 저장 ({len(pts)}개 꼭짓점)",
+        f"💾 ROI 저장 ({zone_count}개 구역)",
         type="primary",
         use_container_width=True,
-        disabled=len(pts) < 3,
+        disabled=zone_count == 0,
     )
 
     st.markdown("---")
 
-    # 꼭짓점 좌표
+    # 확정된 구역
+    if polygons:
+        st.markdown("### 확정된 구역")
+        for z, poly in enumerate(polygons):
+            zc1, zc2 = st.columns([5, 1])
+            zc1.markdown(f"**ROI{z + 1}** &nbsp;&nbsp; 꼭짓점 {len(poly)}개")
+            if zc2.button("🗑️", key=f"del_zone_{z}", help=f"ROI{z + 1} 삭제"):
+                st.session_state.roi_polygons.pop(z)
+                st.rerun()
+
+    # 꼭짓점 좌표 (지금 그리는 구역)
     if pts:
-        st.markdown("### 꼭짓점 좌표")
+        st.markdown(f"### 꼭짓점 좌표 (ROI{len(polygons) + 1})")
         for i, p in enumerate(pts):
             st.markdown(f"**{i+1}** &nbsp;&nbsp; ({p[0]}, {p[1]})")
 
@@ -244,9 +295,10 @@ with settings_col:
     if saved:
         sel = st.selectbox("ROI 선택", ["— 선택 —"] + saved)
         if sel != "— 선택 —":
-            loaded_pts = load_roi(sel)
-            if loaded_pts is not None:
-                st.success(f"{len(loaded_pts)}개 꼭짓점")
+            loaded_polys = load_rois(sel)
+            if loaded_polys is not None:
+                vertex_counts = "/".join(str(len(p)) for p in loaded_polys)
+                st.success(f"{len(loaded_polys)}개 구역 · 꼭짓점 {vertex_counts}개")
 
             # 삭제 (확인 절차 포함)
             confirm_key = f"confirm_del_roi_{sel}"
@@ -286,8 +338,9 @@ with canvas_col:
 
     st.markdown(f"### 클릭하여 꼭짓점 추가 &nbsp;&nbsp;&nbsp; `{orig_w} × {orig_h}`")
 
-    pil_img = render_frame(frame, st.session_state.roi_points, scale)
-    click = streamlit_image_coordinates(pil_img, key="roi_click")
+    pil_img = render_frame(frame, st.session_state.roi_points, scale,
+                           st.session_state.roi_polygons)
+    click = streamlit_image_coordinates(pil_img, key=f"roi_click_{st.session_state.roi_click_ver}")
 
     # 새로운 클릭 → 꼭짓점 추가
     if click is not None:
@@ -304,14 +357,17 @@ if save_clicked:
     label = st.session_state.roi_src_label
     if not label:
         st.error("❌ **ROI 이름**을 입력하세요.")
-    elif len(pts) < 3:
+    elif 0 < len(pts) < 3:
+        st.error("❌ 그리던 구역의 꼭짓점이 3개 미만입니다. 점을 더 찍거나 ↩️ 마지막 취소로 지우세요.")
+    elif zone_count == 0:
         st.error("❌ 꼭짓점이 3개 이상이어야 합니다.")
     else:
-        path = save_roi(label, pts)
+        zones = polygons + ([pts] if len(pts) >= 3 else [])
+        path = save_roi(label, zones)
         st.success(
             f"✅ ROI 저장 완료!\n\n"
             f"- 이름: **{label}**\n"
-            f"- 꼭짓점: {len(pts)}개\n"
+            f"- 구역: {len(zones)}개 (꼭짓점 {'/'.join(str(len(z)) for z in zones)}개)\n"
             f"- 파일: `{path}`\n\n"
             f"모니터링 페이지에서 **{label}** 소스를 선택하면 자동으로 적용됩니다."
         )

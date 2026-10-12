@@ -51,7 +51,7 @@ if ROOT not in sys.path:
 
 from config import DATA_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS
 from core.detector     import Detector
-from core.roi_manager  import load_roi, list_saved_rois
+from core.roi_manager  import load_rois, list_saved_rois
 from core.video_source import VideoSource, validate_rtsp_url, test_rtsp_connection
 from core.danger_logic import check_danger, draw_detections
 from core.event_saver  import (
@@ -739,7 +739,7 @@ if is_rtsp and (rtsp_reader is None or not rtsp_reader.is_alive):
 if not is_rtsp and (vs is None or not vs.is_open()):
     stop_all(); st.warning("⚠️ 영상 소스 연결이 끊어졌습니다."); st.stop()
 
-roi_polygon = load_roi(st.session_state.source_name)
+roi_polygon = load_rois(st.session_state.source_name)   # 다각형 리스트 or None
 
 # ══════════════════════════════════════════════════════
 # 처리 해상도 축소 (파일 모드) — 메인 루프 부담 줄여 매끄러운 재생 확보
@@ -754,7 +754,15 @@ if not is_rtsp and vs is not None and vs.cap is not None:
     if orig_w > PROC_MAX_W:
         proc_scale = PROC_MAX_W / orig_w
         if roi_polygon is not None:
-            roi_polygon = (roi_polygon.astype(np.float32) * proc_scale).astype(np.int32)
+            roi_polygon = [(poly.astype(np.float32) * proc_scale).astype(np.int32)
+                           for poly in roi_polygon]
+
+if roi_polygon is None:
+    roi_status = "⚠️ 미설정"
+elif len(roi_polygon) == 1:
+    roi_status = "✅"
+else:
+    roi_status = f"✅ {len(roi_polygon)}개 구역"
 
 # ── 영상 재생 컨트롤 (파일 모드에서만 표시) ───────────────
 total_video_frames = 0
@@ -964,7 +972,7 @@ while st.session_state.running:
 
     persons = len(danger_result["all_persons"])
     cars    = len(danger_result["all_cars"])
-    info_ph.caption(f"사람 {persons}명 | 자동차 {cars}대 | ROI {'✅' if roi_polygon is not None else '⚠️ 미설정'} | {st.session_state.source_name}")
+    info_ph.caption(f"사람 {persons}명 | 자동차 {cars}대 | ROI {roi_status} | {st.session_state.source_name}")
 
     # ── 오른쪽 상태창 업데이트 ────────────────────────────
     if is_danger:

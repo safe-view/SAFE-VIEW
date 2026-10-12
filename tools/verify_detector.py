@@ -5,6 +5,8 @@ OpenVINO 백엔드는 "같은 결과를 더 빨리" 내는 것이 목적이므�
 
     A1 — openvino 가 없거나 모델을 안 내보낸 환경에서 기존대로 동작하는가
     A4 — 위험 판정 6개 사례가 기존과 같은 답을 내는가
+    R1 — ROI 가 여러 개일 때(도로 양쪽 보행 구역) 판정·구역 인덱스가 맞는가
+    R2 — 여러 구역 저장·불러오기와 구형식 ROI 파일 호환
     A5 — 워밍업 덕분에 첫 프레임에서 멈추지 않는가
     A8 — detect() 반환 딕셔너리 형식이 그대로인가
          (`track_id` 는 추적 도입 때 추가된 키로, 추적이 꺼져 있으면 None)
@@ -120,6 +122,66 @@ def verify_danger():
         check(label, got == expected, f"기대 {expected} / 실제 {got}")
 
 
+def verify_multi_roi():
+    print("\n[R1] 여러 ROI 위험 판정 (도로 양쪽 보행 구역)")
+    roi_a = np.array([(100, 100), (300, 100), (300, 500), (100, 500)], dtype=np.int32)
+    roi_b = np.array([(700, 100), (900, 100), (900, 500), (700, 500)], dtype=np.int32)
+    rois = [roi_a, roi_b]
+    car = fake_det("car", 500, 300)
+    cases = [
+        ("ROI A 안 사람+차량",       [fake_det("person", 200, 300), car],          True,  [0]),
+        ("ROI B 안 사람+차량",       [fake_det("person", 800, 300), car],          True,  [1]),
+        ("양쪽 ROI 사람+차량",       [fake_det("person", 200, 300),
+                                      fake_det("person", 800, 300), car],          True,  [0, 1]),
+        ("두 ROI 사이 도로 사람+차량", [fake_det("person", 500, 300), car],          False, []),
+        ("ROI A 안 사람+정지차량",   [fake_det("person", 200, 300),
+                                      fake_det("car", 500, 300, parked=True)],     False, []),
+        ("빈 ROI 리스트",            [fake_det("person", 200, 300), car],          False, None),
+    ]
+    for label, detections, expected, expected_idx in cases:
+        result = check_danger(detections, [] if expected_idx is None else rois)
+        got, got_idx = result["is_danger"], result["danger_roi_indices"]
+        ok = got == expected and got_idx == (expected_idx or [])
+        check(label, ok, f"기대 {expected}{expected_idx or []} / 실제 {got}{got_idx}")
+
+
+def verify_roi_storage():
+    print("\n[R2] ROI 저장·불러오기 (여러 구역 + 구형식 호환)")
+    import json
+    import tempfile
+    from core import roi_manager
+
+    tri_a = [[10, 10], [100, 10], [50, 90]]
+    tri_b = [[200, 10], [300, 10], [250, 90]]
+    original_dir = roi_manager.ROI_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        roi_manager.ROI_DIR = tmp   # roi_configs/ 에 테스트 파일을 남기지 않음
+        try:
+            path = roi_manager.save_roi("multi", [tri_a, tri_b])
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            loaded = roi_manager.load_rois("multi")
+            check("2개 구역 저장 → 2개 복원",
+                  loaded is not None and [p.tolist() for p in loaded] == [tri_a, tri_b])
+            check("JSON 에 polygons(2개)와 points(첫 구역) 함께 기록",
+                  data.get("polygons") == [tri_a, tri_b] and data.get("points") == tri_a)
+            check("load_roi 는 첫 구역 (N,2) 배열 반환",
+                  roi_manager.load_roi("multi").tolist() == tri_a)
+
+            with open(os.path.join(tmp, "legacy.json"), "w", encoding="utf-8") as f:
+                json.dump({"source": "legacy", "points": tri_a}, f)
+            legacy = roi_manager.load_rois("legacy")
+            check("구형식(points만) → 1개 구역으로 로드",
+                  legacy is not None and len(legacy) == 1 and legacy[0].tolist() == tri_a)
+
+            roi_manager.save_roi("single", tri_b)
+            single = roi_manager.load_rois("single")
+            check("단일 다각형 save_roi 호출 → 1개 구역 저장",
+                  single is not None and len(single) == 1 and single[0].tolist() == tri_b)
+        finally:
+            roi_manager.ROI_DIR = original_dir
+
+
 def verify_fallback(frame):
     print("\n[A1] OpenVINO 미준비 환경 폴백")
     ov_dir = config.OPENVINO_MODEL_DIR
@@ -152,6 +214,8 @@ def main() -> int:
     detections = verify_warmup(frame)
     verify_format(detections)
     verify_danger()
+    verify_multi_roi()
+    verify_roi_storage()
     verify_fallback(frame)
 
     print("\n" + ("전부 PASS" if not _fails else f"FAIL {len(_fails)}건: {_fails}"))

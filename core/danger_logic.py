@@ -5,12 +5,14 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.roi_manager import is_point_in_roi
+from core.roi_manager import normalize_rois, roi_indices_containing
 
 
 def check_danger(detections: list, roi_polygon) -> dict:
     """
     탐지 결과와 ROI를 받아 위험 상태 여부를 판단합니다.
+    roi_polygon: 다각형 하나(numpy array (N,2)) 또는 다각형 리스트 — 사람이
+                 어느 ROI 에라도 들어가면 ROI 내부로 판단합니다.
 
     반환 dict:
     {
@@ -18,6 +20,7 @@ def check_danger(detections: list, roi_polygon) -> dict:
         "has_person":        bool,
         "has_car":           bool,
         "dangerous_persons": list,   # ROI 내부에 있는 person 탐지 목록
+        "danger_roi_indices": list,  # 위험 인물이 들어 있는 ROI 인덱스
         "all_persons":       list,
         "all_cars":          list,
     }
@@ -33,6 +36,7 @@ def check_danger(detections: list, roi_polygon) -> dict:
         "has_person":        len(persons) > 0,
         "has_car":           len(active_cars) > 0,
         "dangerous_persons": [],
+        "danger_roi_indices": [],
         "all_persons":       persons,
         "all_cars":          cars,   # 시각화는 정지 차량 포함 (노란 박스로 표시)
     }
@@ -40,23 +44,28 @@ def check_danger(detections: list, roi_polygon) -> dict:
     # 위험 판단 조건:
     # 1) person 존재
     # 2) 이동 가능 차량(active_cars) 존재
-    # 3) person의 발 위치(bottom_center)가 ROI 내부
+    # 3) person의 발 위치(bottom_center)가 ROI 중 하나라도의 내부
     if not persons or not active_cars:
         return result
 
-    if roi_polygon is None:
+    polygons = normalize_rois(roi_polygon)
+    if not polygons:
         # ROI 미설정 시 위험 판단 불가 → 정상 처리
         return result
 
     dangerous = []
+    danger_indices = set()
     for person in persons:
         # 발 위치(bottom_center)로 ROI 판단
-        if is_point_in_roi(person["bottom_center"], roi_polygon):
+        indices = roi_indices_containing(person["bottom_center"], polygons)
+        if indices:
             dangerous.append(person)
+            danger_indices.update(indices)
 
     if dangerous:
         result["is_danger"] = True
         result["dangerous_persons"] = dangerous
+        result["danger_roi_indices"] = sorted(danger_indices)
 
     return result
 
@@ -75,7 +84,8 @@ def draw_detections(frame, danger_result: dict, roi_polygon=None):
     is_danger = danger_result["is_danger"]
 
     # ROI 그리기
-    frame = draw_roi_on_frame(frame, roi_polygon, danger=is_danger)
+    frame = draw_roi_on_frame(frame, roi_polygon, danger=is_danger,
+                              danger_indices=danger_result.get("danger_roi_indices"))
 
     # 위험한 person ID 집합 (비교용)
     dangerous_ids = {id(p) for p in danger_result["dangerous_persons"]}

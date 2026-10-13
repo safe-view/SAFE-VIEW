@@ -1,7 +1,7 @@
 # pages/1_모니터링.py — 실시간 위험 감지 메인 화면
 
 import streamlit as st
-import cv2, os, sys, time, threading
+import cv2, os, sys, time, threading, uuid
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from collections import deque
@@ -49,7 +49,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from config import DATA_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS
+from config import DATA_DIR, LOGS_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS
 from core.detector     import Detector
 from core.roi_manager  import load_roi, list_saved_rois
 from core.video_source import VideoSource, validate_rtsp_url, test_rtsp_connection
@@ -602,6 +602,14 @@ with settings_col:
     # 패널의 마지막에는 실시간 FPS만 간결하게 표시
     st.markdown("### 시스템 상태")
     fps_ph = st.empty()
+    if not start_btn and not stop_btn:
+        fps_debug_id = uuid.uuid4().hex[:8]
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        with open(os.path.join(LOGS_DIR, "fps_ph_debug.log"), "a", encoding="utf-8") as log_file:
+            log_file.write(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} id={fps_debug_id} "
+                f"running={st.session_state.running} paused={st.session_state.paused}\n"
+            )
     if not st.session_state.running:
         fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
 
@@ -776,7 +784,6 @@ if not is_rtsp and vs is not None and vs.cap is not None:
                     # 재생 재개: 일시정지로 흘러간 시간 누적
                     st.session_state.video_total_paused += time.time() - st.session_state.video_pause_start
                 st.session_state.paused = not st.session_state.paused
-                st.rerun()
         with cc2:
             if total_video_frames > 0:
                 current_pos = int(vs.cap.get(cv2.CAP_PROP_POS_FRAMES))
@@ -796,7 +803,6 @@ if not is_rtsp and vs is not None and vs.cap is not None:
                     fps = st.session_state.video_fps or 30.0
                     st.session_state.video_start_time = time.time() - (seek_val / fps)
                     st.session_state.video_total_paused = 0.0
-                    st.rerun()
 
 async_worker = st.session_state.async_detector
 

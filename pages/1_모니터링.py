@@ -886,6 +886,17 @@ while st.session_state.running:
     is_danger     = danger_result["is_danger"]
 
     now = time.time()
+
+    # 위험 상태의 엣지에서만 경고음을 시작/정지해 재생 iframe을 유지한다.
+    if is_danger and not st.session_state.prev_danger:
+        with sound_ph.container():
+            components_html(
+                f'<audio autoplay loop src="data:audio/wav;base64,{ALERT_BEEP_B64}"></audio>',
+                height=0,
+            )
+    elif not is_danger and st.session_state.prev_danger:
+        sound_ph.empty()
+
     event_triggered = False
     if is_danger and not st.session_state.prev_danger:
         if now - st.session_state.last_event_ts > 15.0:
@@ -893,12 +904,6 @@ while st.session_state.running:
             st.session_state.last_event_ts = now
             st.session_state.alert_msg     = "🚨 보안 구역 내 위험 감지!"
             st.session_state.alert_expires = now + 4.0
-            # 경고음 재생 (HTML5 audio + autoplay, 매번 새 iframe으로 강제 재생)
-            with sound_ph.container():
-                components_html(
-                    f'<audio autoplay src="data:audio/wav;base64,{ALERT_BEEP_B64}"></audio>',
-                    height=0,
-                )
 
     st.session_state.prev_danger = is_danger
 

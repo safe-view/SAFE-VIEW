@@ -49,7 +49,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from config import DATA_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS
+from config import DATA_DIR, LOGS_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS
 from core.detector     import Detector
 from core.roi_manager  import load_rois, list_saved_rois
 from core.video_source import VideoSource, validate_rtsp_url, test_rtsp_connection
@@ -433,8 +433,20 @@ st.markdown("""
 
 settings_col, main_col, status_col = st.columns([1, 2.5, 1])
 
+# 실행 상태에 따라 달라지는 설정 위젯보다 먼저 FPS 영역의 자리를 고정한다.
+# 설정 UI는 첫 컨테이너에 나중에 채우므로 화면에서는 FPS가 패널 맨 아래에 유지된다.
+settings_content = settings_col.container()
+fps_panel = settings_col.container()
+
+with fps_panel:
+    st.markdown("---")
+    st.markdown("### 시스템 상태")
+    fps_ph = st.empty()
+    if not st.session_state.running:
+        fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
+
 # ── 왼쪽: 영상 소스 설정 ──────────────────────────────
-with settings_col:
+with settings_content:
     st.markdown('<span class="sv-source-panel-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
     st.markdown("### 영상 소스 설정")
     source_type = st.radio("소스", ["📁 파일", "📡 RTSP"], horizontal=True, disabled=st.session_state.running, label_visibility="collapsed")
@@ -596,14 +608,6 @@ with settings_col:
         help="저조도 환경에서 영상을 자동으로 밝게 보정합니다",
     )
     st.session_state.enhance_mode = enhance_mode
-
-    st.markdown("---")
-
-    # 패널의 마지막에는 실시간 FPS만 간결하게 표시
-    st.markdown("### 시스템 상태")
-    fps_ph = st.empty()
-    if not st.session_state.running:
-        fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
 
 # ══════════════════════════════════════════════════════
 # 시작/정지 처리
@@ -784,7 +788,6 @@ if not is_rtsp and vs is not None and vs.cap is not None:
                     # 재생 재개: 일시정지로 흘러간 시간 누적
                     st.session_state.video_total_paused += time.time() - st.session_state.video_pause_start
                 st.session_state.paused = not st.session_state.paused
-                st.rerun()
         with cc2:
             if total_video_frames > 0:
                 current_pos = int(vs.cap.get(cv2.CAP_PROP_POS_FRAMES))
@@ -804,7 +807,6 @@ if not is_rtsp and vs is not None and vs.cap is not None:
                     fps = st.session_state.video_fps or 30.0
                     st.session_state.video_start_time = time.time() - (seek_val / fps)
                     st.session_state.video_total_paused = 0.0
-                    st.rerun()
 
 async_worker = st.session_state.async_detector
 

@@ -1,7 +1,7 @@
 # pages/1_모니터링.py — 실시간 위험 감지 메인 화면
 
 import streamlit as st
-import cv2, os, sys, time, threading, uuid
+import cv2, os, sys, time, threading
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from collections import deque
@@ -433,8 +433,20 @@ st.markdown("""
 
 settings_col, main_col, status_col = st.columns([1, 2.5, 1])
 
+# 실행 상태에 따라 달라지는 설정 위젯보다 먼저 FPS 영역의 자리를 고정한다.
+# 설정 UI는 첫 컨테이너에 나중에 채우므로 화면에서는 FPS가 패널 맨 아래에 유지된다.
+settings_content = settings_col.container()
+fps_panel = settings_col.container()
+
+with fps_panel:
+    st.markdown("---")
+    st.markdown("### 시스템 상태")
+    fps_ph = st.empty()
+    if not st.session_state.running:
+        fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
+
 # ── 왼쪽: 영상 소스 설정 ──────────────────────────────
-with settings_col:
+with settings_content:
     st.markdown('<span class="sv-source-panel-marker" aria-hidden="true"></span>', unsafe_allow_html=True)
     st.markdown("### 영상 소스 설정")
     source_type = st.radio("소스", ["📁 파일", "📡 RTSP"], horizontal=True, disabled=st.session_state.running, label_visibility="collapsed")
@@ -596,22 +608,6 @@ with settings_col:
         help="저조도 환경에서 영상을 자동으로 밝게 보정합니다",
     )
     st.session_state.enhance_mode = enhance_mode
-
-    st.markdown("---")
-
-    # 패널의 마지막에는 실시간 FPS만 간결하게 표시
-    st.markdown("### 시스템 상태")
-    fps_ph = st.empty()
-    if not start_btn and not stop_btn:
-        fps_debug_id = uuid.uuid4().hex[:8]
-        os.makedirs(LOGS_DIR, exist_ok=True)
-        with open(os.path.join(LOGS_DIR, "fps_ph_debug.log"), "a", encoding="utf-8") as log_file:
-            log_file.write(
-                f"{time.strftime('%Y-%m-%d %H:%M:%S')} id={fps_debug_id} "
-                f"running={st.session_state.running} paused={st.session_state.paused}\n"
-            )
-    if not st.session_state.running:
-        fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
 
 # ══════════════════════════════════════════════════════
 # 시작/정지 처리

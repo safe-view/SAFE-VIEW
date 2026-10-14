@@ -8,6 +8,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.roi_manager import normalize_rois, roi_indices_containing
 
 
+def update_danger_hold(raw_danger: bool, last_seen_ts, now: float, hold_sec: float):
+    """
+    프레임 단위 판정이 끊겨도 경고가 깜빡이지 않도록,
+    마지막 위험 감지 시점부터 hold_sec 동안 위험 상태를 유지합니다.
+
+    Args:
+        raw_danger:   이번 프레임의 check_danger 결과
+        last_seen_ts: 마지막 위험 감지 시각 (한 번도 없으면 None)
+        now:          현재 시각
+        hold_sec:     유지 시간(초)
+
+    Returns:
+        (held_danger, last_seen_ts)
+    """
+    if raw_danger:
+        last_seen_ts = now
+    held = last_seen_ts is not None and (now - last_seen_ts) < hold_sec
+    return held, last_seen_ts
+
+
 def check_danger(detections: list, roi_polygon) -> dict:
     """
     탐지 결과와 ROI를 받아 위험 상태 여부를 판단합니다.

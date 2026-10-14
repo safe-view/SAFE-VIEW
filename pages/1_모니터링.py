@@ -49,11 +49,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from config import DATA_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS
+from config import DATA_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS, DANGER_HOLD_SEC
 from core.detector     import Detector
 from core.roi_manager  import load_rois, list_saved_rois
 from core.video_source import VideoSource, validate_rtsp_url, test_rtsp_connection
-from core.danger_logic import check_danger, draw_detections
+from core.danger_logic import check_danger, draw_detections, update_danger_hold
 from core.event_saver  import (
     save_event_image, save_event_clip,
     log_event, get_recent_events,
@@ -343,6 +343,7 @@ def init_state():
     defaults = {
         "running":        False,
         "prev_danger":    False,
+        "danger_last_seen_ts": None,
         "frame_idx":      0,
         "last_event_ts":  0.0,
         "fps_timer":      time.time(),
@@ -660,6 +661,7 @@ if start_btn and selected_source:
         "source_name":    source_label,
         "frame_idx":      0,
         "prev_danger":    False,
+        "danger_last_seen_ts": None,
         "frame_buffer":   deque(maxlen=buf_size),
         "running":        True,
         "last_good_frame": None,
@@ -818,6 +820,7 @@ while st.session_state.running:
             pass
         st.session_state.seek_target = None
         st.session_state.frame_buffer.clear()
+        st.session_state.danger_last_seen_ts = None
         reset_parked()
         if async_worker is not None:
             async_worker.reset_motion_compensation()
@@ -881,9 +884,14 @@ while st.session_state.running:
     st.session_state.last_detections = detections
 
     danger_result = check_danger(detections, roi_polygon)
-    is_danger     = danger_result["is_danger"]
 
+    # 프레임 단위 판정이 끊겨도 마지막 감지 후 DANGER_HOLD_SEC 동안 경고 유지
+    # → 유지 구간 하나가 이벤트 하나(상승 에지 1회)로 기록됨
     now = time.time()
+    is_danger, st.session_state.danger_last_seen_ts = update_danger_hold(
+        danger_result["is_danger"], st.session_state.danger_last_seen_ts, now, DANGER_HOLD_SEC,
+    )
+
     event_triggered = False
     if is_danger and not st.session_state.prev_danger:
         if now - st.session_state.last_event_ts > 15.0:

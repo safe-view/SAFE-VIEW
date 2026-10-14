@@ -7,6 +7,7 @@ OpenVINO 백엔드는 "같은 결과를 더 빨리" 내는 것이 목적이므�
     A4 — 위험 판정 6개 사례가 기존과 같은 답을 내는가
     R1 — ROI 가 여러 개일 때(도로 양쪽 보행 구역) 판정·구역 인덱스가 맞는가
     R2 — 여러 구역 저장·불러오기와 구형식 ROI 파일 호환
+    H1 — 마지막 감지 후 3초 경고 유지, 깜빡이는 감지가 이벤트 1건으로 묶이는가
     A5 — 워밍업 덕분에 첫 프레임에서 멈추지 않는가
     A8 — detect() 반환 딕셔너리 형식이 그대로인가
          (`track_id` 는 추적 도입 때 추가된 키로, 추적이 꺼져 있으면 None)
@@ -26,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 
 import config
-from core.danger_logic import check_danger
+from core.danger_logic import check_danger, update_danger_hold
 from core.detector import Detector
 
 DETECT_KEYS = {"class_id", "class_name", "confidence", "bbox", "center",
@@ -145,6 +146,45 @@ def verify_multi_roi():
         check(label, ok, f"기대 {expected}{expected_idx or []} / 실제 {got}{got_idx}")
 
 
+def verify_danger_hold():
+    print("\n[H1] 위험 경고 유지 (마지막 감지 후 3초)")
+    hold = 3.0
+
+    def run(seq):
+        """seq: [(now, raw)] → [held]"""
+        last, out = None, []
+        for now, raw in seq:
+            held, last = update_danger_hold(raw, last, now, hold)
+            out.append(held)
+        return out
+
+    def rising_edges(states):
+        prev, n = False, 0
+        for s in states:
+            n += s and not prev
+            prev = s
+        return n
+
+    check("감지 이력 없음 → 유지 안 함", run([(0.0, False)]) == [False])
+    check("감지 직후 → 위험", run([(0.0, True)]) == [True])
+    check("감지 후 2.9초 → 유지", run([(0.0, True), (2.9, False)])[-1] is True)
+    check("감지 후 3.1초 → 해제", run([(0.0, True), (3.1, False)])[-1] is False)
+    refreshed = run([(0.0, True), (2.0, True), (4.9, False), (5.1, False)])
+    check("재감지 시 타이머 갱신 (4.9초 유지 / 5.1초 해제)",
+          refreshed[2:] == [True, False], f"실제 {refreshed}")
+
+    flicker = [True, False, True, False, False, True, False, False, False]
+    seq = [(i * 0.5, raw) for i, raw in enumerate(flicker)]
+    states = run(seq)
+    check("깜빡이는 감지 → 경고 계속 유지", all(states), f"실제 {states}")
+    check("깜빡이는 감지 → 이벤트(상승 에지) 1회", rising_edges(states) == 1)
+
+    # 마지막 True(2.5초) 기준 3초가 지나면 해제되고, 다음 감지는 새 이벤트
+    states = run(seq + [(5.6, False), (6.0, True)])
+    check("유지 해제 후 재감지 → 새 이벤트",
+          states[-2:] == [False, True] and rising_edges(states) == 2, f"실제 {states}")
+
+
 def verify_roi_storage():
     print("\n[R2] ROI 저장·불러오기 (여러 구역 + 구형식 호환)")
     import json
@@ -215,6 +255,7 @@ def main() -> int:
     verify_format(detections)
     verify_danger()
     verify_multi_roi()
+    verify_danger_hold()
     verify_roi_storage()
     verify_fallback(frame)
 

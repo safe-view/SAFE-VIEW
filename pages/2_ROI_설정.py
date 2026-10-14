@@ -321,6 +321,29 @@ with settings_col:
         st.caption("저장된 ROI 없음")
 
 
+# ── 저장 처리 ────────────────────────────────────────
+roi_save_error_msg = None
+roi_save_success_msg = None
+if save_clicked:
+    label = st.session_state.roi_src_label
+    if not label:
+        roi_save_error_msg = "❌ **ROI 이름**을 입력하세요."
+    elif 0 < len(pts) < 3:
+        roi_save_error_msg = "❌ 그리던 구역의 꼭짓점이 3개 미만입니다. 점을 더 찍거나 ↩️ 마지막 취소로 지우세요."
+    elif zone_count == 0:
+        roi_save_error_msg = "❌ 꼭짓점이 3개 이상이어야 합니다."
+    else:
+        zones = polygons + ([pts] if len(pts) >= 3 else [])
+        path = save_roi(label, zones)
+        roi_save_success_msg = (
+            f"✅ ROI 저장 완료!\n\n"
+            f"- 이름: **{label}**\n"
+            f"- 구역: {len(zones)}개 (꼭짓점 {'/'.join(str(len(z)) for z in zones)}개)\n"
+            f"- 파일: `{path}`\n\n"
+            f"모니터링 페이지에서 **{label}** 소스를 선택하면 자동으로 적용됩니다."
+        )
+
+
 # ── 오른쪽: 캔버스 (영상 + 클릭) ─────────────────────
 with canvas_col:
     frame = st.session_state.roi_frame
@@ -352,22 +375,9 @@ with canvas_col:
             st.session_state.roi_points.append([orig_x, orig_y])
             st.rerun()
 
-# ── 저장 처리 ────────────────────────────────────────
-if save_clicked:
-    label = st.session_state.roi_src_label
-    if not label:
-        st.error("❌ **ROI 이름**을 입력하세요.")
-    elif 0 < len(pts) < 3:
-        st.error("❌ 그리던 구역의 꼭짓점이 3개 미만입니다. 점을 더 찍거나 ↩️ 마지막 취소로 지우세요.")
-    elif zone_count == 0:
-        st.error("❌ 꼭짓점이 3개 이상이어야 합니다.")
-    else:
-        zones = polygons + ([pts] if len(pts) >= 3 else [])
-        path = save_roi(label, zones)
-        st.success(
-            f"✅ ROI 저장 완료!\n\n"
-            f"- 이름: **{label}**\n"
-            f"- 구역: {len(zones)}개 (꼭짓점 {'/'.join(str(len(z)) for z in zones)}개)\n"
-            f"- 파일: `{path}`\n\n"
-            f"모니터링 페이지에서 **{label}** 소스를 선택하면 자동으로 적용됩니다."
-        )
+    if roi_save_success_msg is not None:
+        st.success(roi_save_success_msg)
+
+
+if roi_save_error_msg is not None:
+    st.error(roi_save_error_msg)

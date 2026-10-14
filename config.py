@@ -75,6 +75,7 @@ FRAME_SKIP      = 2       # N 프레임마다 1번 YOLO 실행 (부하 감소)
 CLIP_PRE_SEC    = 5       # 이벤트 발생 전 몇 초 저장
 CLIP_POST_SEC   = 10      # 이벤트 발생 후 몇 초 저장
 MAX_CLIP_FPS    = 10      # 저장 클립 FPS
+DANGER_HOLD_SEC = 3.0     # 마지막 위험 감지 후 경고 유지 시간(초)
 
 # ── ROI 박스 색상 (BGR) ────────────────────────────────
 COLOR_ROI        = (0, 255, 255)   # 노란색 (ROI 테두리)

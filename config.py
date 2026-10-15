@@ -39,10 +39,17 @@ LOG_FILE        = os.path.join(LOGS_DIR, "events_log.csv")
 # 즉 CPU에서는 OpenVINO 가 이득이 아니므로 켜지 않는 것이 기본입니다.
 # 자기 PC에서는 `python tools/bench_detector.py` 로 직접 재본 뒤 바꾸세요.
 #
-# "pytorch"  : 기존 동작 (기본값)
+# 앱 실행 중 측정(같은 PC, gta 영상) — 메인 루프와 CPU 를 나눠 쓰면서 차이가 커집니다.
+#   PyTorch CPU   단독 45 ms → 앱 안 약 207 ms
+#   OpenVINO GPU  단독 17 ms → 앱 안 약 28~31 ms
+#
+# NVIDIA GPU: PyTorch 경로가 CUDA 를 자동으로 씁니다. 단 torch 를 CUDA 빌드로
+# 설치해야 합니다(README "NVIDIA GPU" 참고). CPU 전용 torch 면 CPU 로 돕니다.
+#
+# "pytorch"  : .pt 사용. CUDA 가 잡히면 GPU, 아니면 CPU
 # "openvino" : OpenVINO 사용. 실패하면 .pt 로 폴백하고 경고를 남깁니다.
-# "auto"     : 내보낸 모델이 있고 openvino 가 설치돼 있으면 OpenVINO, 아니면 .pt
-INFER_BACKEND      = "pytorch"
+# "auto"     : NVIDIA GPU(CUDA) → OpenVINO(내보낸 모델+패키지 있을 때) → PyTorch CPU 순
+INFER_BACKEND      = "auto"
 OPENVINO_MODEL_DIR = os.path.join(BASE_DIR, "yolov8n_openvino_model")
 # OpenVINO 를 쓸 때의 디바이스. 반드시 명시합니다 — ultralytics 기본값 "AUTO" 는
 # 측정에서 직접 지정보다 느렸습니다.

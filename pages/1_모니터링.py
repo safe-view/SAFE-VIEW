@@ -875,8 +875,11 @@ while st.session_state.running:
 
     st.session_state.frame_idx += 1
     update_fps()
-    # 소스 설정 패널의 FPS 표시 갱신
-    fps_ph.markdown(f"**FPS** &nbsp; {st.session_state.fps_display}")
+    # 소스 설정 패널의 FPS / 추론 시간 표시 갱신 (추론 시간이 길수록 박스가 뒤처짐)
+    infer_ms = async_worker.get_infer_ms() if async_worker is not None else 0.0
+    fps_ph.markdown(
+        f"**FPS** &nbsp; {st.session_state.fps_display} &nbsp;|&nbsp; **추론** &nbsp; {infer_ms:.0f} ms"
+    )
 
     # 비동기 YOLO 워커에 최신 프레임 전달 → 백그라운드에서 추론
     # 메인 루프는 추론을 기다리지 않고 가장 최근 검출 결과를 사용

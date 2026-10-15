@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 
 import config
-from core.danger_logic import check_danger, update_danger_hold
+from core.danger_logic import check_danger, update_danger_hold, hold_person_boxes
 from core.detector import Detector
 
 DETECT_KEYS = {"class_id", "class_name", "confidence", "bbox", "center",
@@ -185,6 +185,72 @@ def verify_danger_hold():
           states[-2:] == [False, True] and rising_edges(states) == 2, f"실제 {states}")
 
 
+def verify_person_box_hold():
+    print("\n[H2] 사람 박스 유지 (안쪽 0.7초 / 가장자리 0.3초 / 2회 이상 검출)")
+    W, H = 960, 540
+    params = dict(frame_w=W, frame_h=H, hold_sec=0.7, edge_hold_sec=0.3, min_hits=2)
+
+    def person(x1, y1, x2, y2):
+        return {"class_name": "person", "bbox": (x1, y1, x2, y2),
+                "bottom_center": ((x1 + x2) // 2, y2)}
+
+    def run(seq, **over):
+        """seq: [(now, [person...], new_result)] → [표시 박스 목록]"""
+        held, out = [], []
+        for now, persons, new_result in seq:
+            shown, held = hold_person_boxes(held, persons, now, new_result=new_result,
+                                            **{**params, **over})
+            out.append([p["bbox"] for p in shown])
+        return out
+
+    inner = person(400, 200, 440, 290)
+    edge = person(500, 460, 540, 540)          # 아래 가장자리에 발이 걸친 사람
+    seen_twice = [(0.0, [inner], True), (0.04, [inner], True)]
+
+    check("2회 검출 후 끊김 0.1초 → 마지막 박스 표시",
+          run(seen_twice + [(0.14, [], True)])[-1] == [inner["bbox"]])
+    out = run(seen_twice + [(0.64, [], True), (0.84, [], True)])
+    check("끊김 0.6초 표시 / 0.8초 사라짐", out[-2] == [inner["bbox"]] and out[-1] == [],
+          f"실제 {out[-2:]}")
+    out = run([(0.0, [edge], True), (0.04, [edge], True), (0.24, [], True), (0.44, [], True)])
+    check("가장자리 끊김 0.2초 표시 / 0.4초 사라짐", out[-2] == [edge["bbox"]] and out[-1] == [],
+          f"실제 {out[-2:]}")
+    check("1회만 검출(오검출) → 끊기면 바로 사라짐",
+          run([(0.0, [inner], True), (0.04, [], True)])[-1] == [])
+    out = run([(0.0, [inner], True), (0.02, [inner], False), (0.03, [inner], False),
+               (0.05, [], True)])
+    check("같은 결과 반복(new_result=False) → 검출 횟수 안 늘어남", out[-1] == [],
+          f"실제 {out[-1]}")
+    moved = person(404, 202, 444, 292)
+    out = run(seen_twice + [(0.1, [], True), (0.14, [moved], True)])
+    check("재검출 → 유지 박스 버리고 현재 박스 하나만", out[-1] == [moved["bbox"]],
+          f"실제 {out[-1]}")
+    other = person(100, 200, 140, 290)
+    out = run([(0.0, [inner, other], True), (0.04, [inner, other], True), (0.1, [other], True)])
+    check("2명 중 1명만 끊김 → 끊긴 사람만 유지",
+          sorted(out[-1]) == sorted([other["bbox"], inner["bbox"]]), f"실제 {out[-1]}")
+    out = run(seen_twice + [(0.1, [], True)], hold_sec=0)
+    check("hold_sec=0 → 현재 검출만 (기존 동작)", out[-1] == [], f"실제 {out[-1]}")
+
+    # 유지된 사람도 위험 판정에 들어간다 (모니터링 화면과 같은 연결 방식)
+    roi = np.array([[380, 180], [460, 180], [460, 310], [380, 310]], dtype=np.int32)
+    car = fake_det("car", 700, 300)
+
+    def danger_at(seq):
+        held, result = [], None
+        for now, persons, new_result in seq:
+            kept, held = hold_person_boxes(held, persons, now, new_result=new_result, **params)
+            result = check_danger(kept + [car], roi)
+        return result["is_danger"]
+
+    check("ROI 안 사람이 0.3초 끊김 + 차량 → 위험",
+          danger_at(seen_twice + [(0.34, [], True)]) is True)
+    check("ROI 안 사람이 0.8초 끊김 + 차량 → 위험 아님 (유지 만료)",
+          danger_at(seen_twice + [(0.84, [], True)]) is False)
+    check("1회 오검출 사람이 끊김 + 차량 → 위험 아님",
+          danger_at([(0.0, [inner], True), (0.04, [], True)]) is False)
+
+
 def verify_roi_storage():
     print("\n[R2] ROI 저장·불러오기 (여러 구역 + 구형식 호환)")
     import json
@@ -256,6 +322,7 @@ def main() -> int:
     verify_danger()
     verify_multi_roi()
     verify_danger_hold()
+    verify_person_box_hold()
     verify_roi_storage()
     verify_fallback(frame)
 

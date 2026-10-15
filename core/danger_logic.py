@@ -28,6 +28,78 @@ def update_danger_hold(raw_danger: bool, last_seen_ts, now: float, hold_sec: flo
     return held, last_seen_ts
 
 
+def _box_iou(a, b) -> float:
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _same_person(a, b) -> bool:
+    """
+    추적 ID 없이 위치로 같은 사람인지 봅니다.
+    a 박스 중심이 b 박스(상하좌우 25%씩 확장) 안에 있거나, 두 박스 IoU가 0.2를 넘으면 같은 사람.
+    """
+    cx = (a[0] + a[2]) / 2
+    cy = (a[1] + a[3]) / 2
+    mw = (b[2] - b[0]) * 0.25
+    mh = (b[3] - b[1]) * 0.25
+    inside = b[0] - mw <= cx <= b[2] + mw and b[1] - mh <= cy <= b[3] + mh
+    return inside or _box_iou(a, b) > 0.2
+
+
+def hold_person_boxes(held: list, persons: list, now: float, frame_w: int, frame_h: int,
+                      hold_sec: float, edge_hold_sec: float, min_hits: int,
+                      new_result: bool = True, edge_px: int = 10):
+    """
+    사람 감지가 잠깐 끊겨도 마지막 박스를 짧게 유지한 사람 목록을 만듭니다.
+    모니터링 화면은 이 목록을 check_danger 에 넘기므로, 유지된 사람도 위험 판정에 포함됩니다.
+
+    Args:
+        held:          직전 상태 [{"person": dict, "last_seen": float, "hits": int}]
+        persons:       이번 프레임의 실제 검출 사람 목록
+        now:           현재 시각
+        frame_w/h:     프레임 크기 (가장자리 판정용)
+        hold_sec:      화면 안쪽에서 끊겼을 때 유지 시간(초). 0 이하면 유지 안 함
+        edge_hold_sec: 마지막 박스가 가장자리에 닿아 있을 때 유지 시간(초)
+        min_hits:      이 횟수 이상 이어서 검출된 사람만 유지 (1프레임 오검출 제외)
+        new_result:    새 추론 결과면 True. 같은 결과를 반복해서 받는 프레임은 False
+                       (False면 검출 횟수를 올리지 않음)
+
+    Returns:
+        (persons, new_held) — persons: 실제 검출 + 유지 중인 사람
+    """
+    if hold_sec <= 0:
+        return list(persons), []
+
+    display = list(persons)
+    new_held = []
+    for p in persons:
+        prev_hits = [h["hits"] for h in held if _same_person(p["bbox"], h["person"]["bbox"])]
+        if new_result:
+            hits = 1 + max(prev_hits, default=0)
+        else:
+            hits = max(prev_hits, default=1)
+        new_held.append({"person": p, "last_seen": now, "hits": hits})
+
+    # 최근에 본 항목부터 — 같은 사람의 유지 박스가 여러 개 남지 않게
+    for h in sorted(held, key=lambda h: -h["last_seen"]):
+        box = h["person"]["bbox"]
+        if any(_same_person(d["bbox"], box) for d in display):
+            continue
+        if h["hits"] < min_hits:
+            continue
+        at_edge = (box[0] <= edge_px or box[1] <= edge_px
+                   or box[2] >= frame_w - edge_px or box[3] >= frame_h - edge_px)
+        limit = edge_hold_sec if at_edge else hold_sec
+        if now - h["last_seen"] <= limit:
+            display.append(h["person"])
+            new_held.append(h)
+
+    return display, new_held
+
+
 def check_danger(detections: list, roi_polygon) -> dict:
     """
     탐지 결과와 ROI를 받아 위험 상태 여부를 판단합니다.

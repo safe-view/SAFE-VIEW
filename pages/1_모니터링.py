@@ -50,10 +50,11 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from config import DATA_DIR, LOGS_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS, DANGER_HOLD_SEC
+from config import PERSON_BOX_HOLD_SEC, PERSON_BOX_EDGE_HOLD_SEC, PERSON_BOX_MIN_HITS
 from core.detector     import Detector
 from core.roi_manager  import load_rois, list_saved_rois
 from core.video_source import VideoSource, validate_rtsp_url, test_rtsp_connection
-from core.danger_logic import check_danger, draw_detections, update_danger_hold
+from core.danger_logic import check_danger, draw_detections, update_danger_hold, hold_person_boxes
 from core.event_saver  import (
     save_event_image, save_event_clip,
     log_event, get_recent_events,
@@ -222,6 +223,7 @@ class AsyncDetectorWorker:
         self._pending_frame = None
         self._latest_detections = []
         self._last_infer_ms = 0.0
+        self._result_seq = 0   # 새 추론 결과가 나올 때마다 1 증가
         self._motion_lock = threading.Lock()
         self._prev_gray = None
         self._shake_x = 0.0
@@ -240,6 +242,11 @@ class AsyncDetectorWorker:
     def get_detections(self):
         with self._lock:
             return list(self._latest_detections)
+
+    def get_result_seq(self) -> int:
+        """추론 결과가 갱신될 때마다 바뀌는 번호. 같은 결과를 반복해서 받는 프레임을 구분합니다."""
+        with self._lock:
+            return self._result_seq
 
     def get_infer_ms(self) -> float:
         """가장 최근 추론 1회에 걸린 시간(ms). 작을수록 박스가 덜 뒤처집니다."""
@@ -331,6 +338,7 @@ class AsyncDetectorWorker:
                         d["is_parked"] = False
                 with self._lock:
                     self._latest_detections = detections
+                    self._result_seq += 1
                     self._last_infer_ms = getattr(self._detector, "last_infer_ms", 0.0)
             except Exception as e:
                 print(f"[AsyncDetector] 추론 실패: {e}")
@@ -344,6 +352,8 @@ def init_state():
         "running":        False,
         "prev_danger":    False,
         "danger_last_seen_ts": None,
+        "person_hold":    [],
+        "person_hold_seq": -1,
         "frame_idx":      0,
         "last_event_ts":  0.0,
         "fps_timer":      time.time(),
@@ -666,6 +676,8 @@ if start_btn and selected_source:
         "frame_idx":      0,
         "prev_danger":    False,
         "danger_last_seen_ts": None,
+        "person_hold":    [],
+        "person_hold_seq": -1,
         "frame_buffer":   deque(maxlen=buf_size),
         "running":        True,
         "last_good_frame": None,
@@ -823,6 +835,7 @@ while st.session_state.running:
         st.session_state.seek_target = None
         st.session_state.frame_buffer.clear()
         st.session_state.danger_last_seen_ts = None
+        st.session_state.person_hold = []
         reset_parked()
         if async_worker is not None:
             async_worker.reset_motion_compensation()
@@ -887,12 +900,25 @@ while st.session_state.running:
         async_worker.submit(frame)
     detections = async_worker.get_detections() if async_worker is not None else []
     st.session_state.last_detections = detections
+    now = time.time()
+
+    # 사람 박스 유지 — YOLO가 사람을 잠깐 놓쳐도 마지막 박스를 짧게 유지해
+    # 화면 표시·위험 판정·인원 카운트에 똑같이 "있는 사람"으로 반영한다
+    result_seq = getattr(async_worker, "get_result_seq", lambda: -1)() if async_worker is not None else -1
+    persons_now = [d for d in detections if d["class_name"] == "person"]
+    held_persons, st.session_state.person_hold = hold_person_boxes(
+        st.session_state.person_hold, persons_now, now,
+        frame.shape[1], frame.shape[0],
+        PERSON_BOX_HOLD_SEC, PERSON_BOX_EDGE_HOLD_SEC, PERSON_BOX_MIN_HITS,
+        new_result=result_seq != st.session_state.person_hold_seq,
+    )
+    st.session_state.person_hold_seq = result_seq
+    detections = [d for d in detections if d["class_name"] != "person"] + held_persons
 
     danger_result = check_danger(detections, roi_polygon)
 
     # 프레임 단위 판정이 끊겨도 마지막 감지 후 DANGER_HOLD_SEC 동안 경고 유지
     # → 유지 구간 하나가 이벤트 하나(상승 에지 1회)로 기록됨
-    now = time.time()
     is_danger, st.session_state.danger_last_seen_ts = update_danger_hold(
         danger_result["is_danger"], st.session_state.danger_last_seen_ts, now, DANGER_HOLD_SEC,
     )

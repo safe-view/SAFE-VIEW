@@ -185,6 +185,51 @@ def check_expire_crash() -> tuple:
 
 
 # ══════════════════════════════════════════════════════
+def seq_parked_brief_occlusion(before: float, occl: float, after: float) -> list:
+    """정지 차량 앞을 다른 물체가 잠깐 가려 박스 면적이 40% 줄었다가 돌아오는 경우.
+
+    gta1원본.mp4 에서 오토바이가 주차 차량 앞을 지나갈 때 관찰된 상황입니다
+    (면적 -38%~-43%, 약 0.1초). 차는 그대로이므로 정지 판정이 풀리면 안 됩니다.
+    """
+    return (seq_parked(before)
+            + [((100, 200), BASE_AREA * 0.6) for _ in range(int(occl * FPS))]
+            + seq_parked(after))
+
+
+def run_flags(seq: list) -> list:
+    """시퀀스를 흘려보내고 프레임별 정지 판정을 그대로 돌려줍니다."""
+    clock = _FakeClock()
+    original_time = pd.time
+    pd.time = clock
+    try:
+        pd.reset()
+        out = []
+        for center, area in seq:
+            clock.advance()
+            out.append(bool(pd.update([center], [area])[0]))
+        return out
+    finally:
+        pd.time = original_time
+
+
+def check_hit_counts() -> tuple:
+    """last_hit_counts() 가 차량별 누적 검출 횟수를 입력 순서대로 돌려주는지."""
+    clock = _FakeClock()
+    original_time = pd.time
+    pd.time = clock
+    try:
+        pd.reset()
+        seen = []
+        for centers in ([(100, 200)], [(100, 200)], [(100, 200), (400, 200)]):
+            clock.advance()
+            pd.update(centers, [BASE_AREA] * len(centers))
+            seen.append(pd.last_hit_counts())
+        ok = seen == [[1], [2], [3, 1]]
+        return ok, f"실제 {seen} (기대 [[1], [2], [3, 1]])"
+    finally:
+        pd.time = original_time
+
+
 def run(seq: list, track_id=None) -> dict:
     """시퀀스를 흘려보내고 (최초 판정 시각, 판정 비율, 마지막 상태)를 돌려줍니다.
 
@@ -281,6 +326,19 @@ def main() -> int:
 
     # H. 이슈 #15 — SLOT_EXPIRE_SEC 을 늘려도 크래시하지 않아야 한다
     check("H. SLOT_EXPIRE_SEC=20 에서 크래시 없음", *check_expire_crash())
+
+    # I. 이슈 #32 — 정지 차량이 0.15초 가려져 면적이 40% 줄어도 판정이 풀리면 안 된다.
+    #    움직임 확정을 샘플 수가 아니라 시간(MOTION_CONFIRM_SEC)으로 보는 이유.
+    flags = run_flags(seq_parked_brief_occlusion(20, 0.15, 20))
+    first = flags.index(True) if True in flags else None
+    released = first is not None and not all(flags[first:])
+    check("I. 정지 차량이 0.15초 가려짐(면적 -40%) → 정지 판정 유지",
+          first is not None and not released,
+          "판정 없음" if first is None else
+          f"최초 {first / FPS:.1f}초, 이후 풀린 프레임 {flags[first:].count(False)}개")
+
+    # J. 이슈 #32 — 처음 보는 차는 검출 횟수 1부터 센다 (1프레임 중복 박스를 위험 요소에서 빼는 근거)
+    check("J. 차량별 누적 검출 횟수(last_hit_counts)", *check_hit_counts())
 
     print("\n" + ("전부 PASS" if not _fails else f"FAIL {len(_fails)}건: {_fails}"))
     return 1 if _fails else 0

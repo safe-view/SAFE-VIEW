@@ -50,7 +50,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from config import DATA_DIR, LOGS_DIR, FRAME_SKIP, CLIP_PRE_SEC, CLIP_POST_SEC, MAX_CLIP_FPS, DANGER_HOLD_SEC
-from config import PERSON_BOX_HOLD_SEC, PERSON_BOX_EDGE_HOLD_SEC, PERSON_BOX_MIN_HITS
+from config import PERSON_BOX_HOLD_SEC, PERSON_BOX_EDGE_HOLD_SEC, PERSON_BOX_MIN_HITS, CAR_MIN_HITS
 from core.detector     import Detector
 from core.roi_manager  import load_rois, list_saved_rois
 from core.video_source import VideoSource, validate_rtsp_url, test_rtsp_connection
@@ -261,7 +261,7 @@ class AsyncDetectorWorker:
             self._motion_frame_count = 0
 
     def _run(self):
-        from core.parked_detector import update as update_parked
+        from core.parked_detector import update as update_parked, last_hit_counts
         while not self._stop_event.is_set():
             frame = None
             with self._lock:
@@ -330,10 +330,12 @@ class AsyncDetectorWorker:
                     for x, y in car_centers
                 ]
                 parked_flags = update_parked(corrected_centers, car_areas, car_ids)
-                car_iter = iter(parked_flags)
+                car_iter = iter(zip(parked_flags, last_hit_counts()))
                 for d in detections:
                     if d["class_name"] == "car":
-                        d["is_parked"] = next(car_iter)
+                        d["is_parked"], hits = next(car_iter)
+                        # 처음 보는 차는 CAR_MIN_HITS 번 잡혀야 위험 요소 (1프레임 중복 박스 제외)
+                        d["car_confirmed"] = hits >= CAR_MIN_HITS
                     else:
                         d["is_parked"] = False
                 with self._lock:
@@ -352,6 +354,7 @@ def init_state():
         "running":        False,
         "prev_danger":    False,
         "danger_last_seen_ts": None,
+        "danger_roi_held": [],
         "person_hold":    [],
         "person_hold_seq": -1,
         "frame_idx":      0,
@@ -676,6 +679,7 @@ if start_btn and selected_source:
         "frame_idx":      0,
         "prev_danger":    False,
         "danger_last_seen_ts": None,
+        "danger_roi_held": [],
         "person_hold":    [],
         "person_hold_seq": -1,
         "frame_buffer":   deque(maxlen=buf_size),
@@ -835,6 +839,7 @@ while st.session_state.running:
         st.session_state.seek_target = None
         st.session_state.frame_buffer.clear()
         st.session_state.danger_last_seen_ts = None
+        st.session_state.danger_roi_held = []
         st.session_state.person_hold = []
         reset_parked()
         if async_worker is not None:
@@ -944,8 +949,19 @@ while st.session_state.running:
     st.session_state.prev_danger = is_danger
 
     # ── 🚨 프레임 시각화 ───────────────────────
+    # 박스 색·테두리·ROI 강조도 3초 유지된 위험 상태를 따른다 — 틴트·문구는 빨간데
+    # 박스만 초록으로 "풀린 것처럼" 보이지 않게 한다. 강조할 ROI 는 마지막 위험 구역을 유지
+    if danger_result["is_danger"]:
+        st.session_state.danger_roi_held = danger_result["danger_roi_indices"]
+    elif not is_danger:
+        st.session_state.danger_roi_held = []
     annotated = frame.copy()
-    annotated = draw_detections(annotated, danger_result, roi_polygon)
+    annotated = draw_detections(
+        annotated,
+        {**danger_result, "is_danger": is_danger,
+         "danger_roi_indices": st.session_state.danger_roi_held},
+        roi_polygon,
+    )
 
     if is_danger:
         # 화면 전체를 붉게 덮는 틴트 효과

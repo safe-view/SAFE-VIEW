@@ -4,8 +4,8 @@
 #   1. 매 프레임마다 감지된 차량의 위치를 기록
 #   2. 추적 ID(ByteTrack)가 오면 그 ID로 같은 차량을 잇고, ID가 없으면
 #      비슷한 위치에 있는 차량을 같은 차량으로 간주 (단순 거리 매칭)
-#   3. 1~2개 샘플의 잡음은 무시하고, 3개 연속 이탈로 실제 움직임을 확인
-#      박스 크기 변화는 같은 방향으로 3연속이어야 움직임으로 본다 — 다가오거나
+#   3. 짧은 잡음은 무시하고, 0.25초 이상(최소 3샘플) 연속 이탈로 실제 움직임을 확인
+#      박스 크기 변화는 같은 방향으로 0.25초 이상 이어져야 움직임으로 본다 — 다가오거나
 #      멀어지는 차는 한 방향으로 꾸준히 변하고, 검출 잡음은 위아래로 진동한다
 #      최근 10초간 정지 상태이고, 마지막 확인된 움직임에서 90초가 지나면 정지로 판정
 #      움직임을 관찰한 적 없는 차량은 10초 정지만으로 판정
@@ -17,6 +17,8 @@ from statistics import median
 
 # 슬롯은 위치 이력, 마지막 감지/이동 시각, 이동 기준점과 연속 이탈 횟수를 보관
 _slots: list[dict] = []
+# 직전 update() 호출에서 각 차량이 매칭된 슬롯의 누적 검출 횟수 (입력과 같은 순서)
+_last_hits: list[int] = []
 
 # 설정값
 MATCH_DISTANCE_PX  = 80.0    # 두 프레임의 차량을 같은 차로 보는 최대 거리 (px)
@@ -33,8 +35,19 @@ STATIONARY_SECONDS = 10.0    # 정지로 판정할 최소 시간 (초)
 # 15초면 정지 10초와 합쳐 25초 — 보통 5~15초인 양보·서행 정차는 계속 걸러내면서
 # 실제 주차 차량은 90초일 때보다 훨씬 빨리 인식된다.
 RECENT_MOTION_GRACE_SECONDS = 15.0
-MOTION_CONFIRM_SAMPLES = 3  # 연속 이탈 확인에 필요한 샘플 수
+MOTION_CONFIRM_SAMPLES = 3  # 연속 이탈 확인에 필요한 최소 샘플 수
+# 연속 이탈이 이 시간 이상 이어져야 움직임으로 확정한다 (샘플 수 조건과 함께).
+# 샘플 수만 보면 추론 속도에 따라 실제 시간이 달라진다 — PyTorch CPU(약 200ms)에서
+# 3샘플은 약 0.6초였지만 OpenVINO(약 30ms)에서는 약 0.1초라, 오토바이가 주차 차량
+# 앞을 잠깐 가린 것(면적 -40%, 약 0.1~0.15초)만으로 움직임이 확정됐다 (#32).
+# 0.25초: 가림은 걸러내면서, 주차 차량이 출발·후진할 때 감지 지연은 변경 전보다 약 0.2초만 늘어난다
+# (0.5초면 약 0.43초 늘어남. gta1원본 오탐 제거 효과는 두 값이 같았다).
+MOTION_CONFIRM_SEC = 0.25
 REFERENCE_SAMPLES = 5  # 기준점의 중앙값에서 최대 2개 잡음을 완화
+# 정지 판정의 기준점(10초 전 위치·면적)을 이 시간 구간의 중앙값으로 잡는다 (최소 REFERENCE_SAMPLES개).
+# 샘플 5개만 쓰면 추론이 빠를 때(약 30ms) 0.15초짜리 가림이 기준점을 통째로 차지해,
+# 가림 10초 뒤에 멀쩡한 차가 "움직였다"로 바뀌었다 (#32).
+REFERENCE_SEC = 1.0
 # 기준 면적 대비 이 비율 이상 변화가 같은 방향으로 3연속이면 움직임으로 본다.
 # 실제 영상에서 멈춰 있는 차의 박스 면적 변화를 재보니 중앙값이 4~23% 였다.
 # 20%로 두면 이 잡음이 그대로 "움직임"으로 찍혀 유예 타이머가 1초에 한 번꼴로
@@ -98,6 +111,7 @@ def update(car_centers: list[tuple], car_areas: list[float],
     now = time.time()
     matched_slots = set()
     results = [False] * len(car_centers)
+    hits = [1] * len(car_centers)
     ids = list(car_ids) if car_ids is not None else [None] * len(car_centers)
 
     # 1) 현재 프레임의 각 차량을 기존 슬롯과 매칭
@@ -144,8 +158,10 @@ def update(car_centers: list[tuple], car_areas: list[float],
                         slot["positions"][:REFERENCE_SAMPLES]
                     )
             elif _distance(slot["motion_anchor"], center) >= MOVE_THRESHOLD_PX:
+                if slot["motion_count"] == 0:
+                    slot["motion_start_ts"] = now
                 slot["motion_count"] += 1
-                if slot["motion_count"] >= MOTION_CONFIRM_SAMPLES:
+                if _motion_confirmed(slot["motion_count"], slot["motion_start_ts"], now):
                     slot["last_motion_ts"] = now
                     slot["motion_anchor"] = _median_center(
                         slot["positions"][-MOTION_CONFIRM_SAMPLES:]
@@ -167,8 +183,11 @@ def update(car_centers: list[tuple], car_areas: list[float],
                     if direction != slot["area_motion_dir"]:
                         slot["area_motion_count"] = 0
                         slot["area_motion_dir"] = direction
+                    if slot["area_motion_count"] == 0:
+                        slot["area_motion_start_ts"] = now
                     slot["area_motion_count"] += 1
-                    if slot["area_motion_count"] >= MOTION_CONFIRM_SAMPLES:
+                    if _motion_confirmed(slot["area_motion_count"],
+                                         slot["area_motion_start_ts"], now):
                         slot["last_motion_ts"] = now
                         slot["area_anchor"] = median(
                             a for _, a in slot["areas"][-MOTION_CONFIRM_SAMPLES:]
@@ -177,6 +196,7 @@ def update(car_centers: list[tuple], car_areas: list[float],
                         slot["area_motion_dir"] = 0
             slot["last_seen"] = now
             matched_slots.add(best_slot_idx)
+            hits[idx] = len(slot["positions"])
             # 정지 여부 판정
             last_motion_ts = slot["last_motion_ts"]
             results[idx] = _is_stationary(slot, now) and (
@@ -193,8 +213,10 @@ def update(car_centers: list[tuple], car_areas: list[float],
                 "last_motion_ts": None,
                 "motion_anchor": None,
                 "motion_count": 0,
+                "motion_start_ts": now,
                 "area_anchor": None,
                 "area_motion_count": 0,
+                "area_motion_start_ts": now,
                 "area_motion_dir": 0,
             })
             # 새 차량은 당연히 정지 아님
@@ -218,7 +240,22 @@ def update(car_centers: list[tuple], car_areas: list[float],
         slot["positions"] = [(t, p) for t, p in slot["positions"] if t >= cutoff]
         slot["areas"] = [(t, a) for t, a in slot["areas"] if t >= cutoff]
 
+    _last_hits[:] = hits
     return results
+
+
+def last_hit_counts() -> list[int]:
+    """
+    직전 update() 의 각 차량(입력 순서)이 지금까지 몇 번 검출됐는지 돌려줍니다.
+    새로 나타난 차는 1 입니다. update() 는 추론 1회당 1번 불리므로
+    "서로 다른 추론 결과에서 잡힌 횟수"와 같습니다.
+    """
+    return list(_last_hits)
+
+
+def _motion_confirmed(count: int, start_ts: float, now: float) -> bool:
+    """연속 이탈이 최소 샘플 수와 최소 시간을 모두 채웠는지."""
+    return count >= MOTION_CONFIRM_SAMPLES and now - start_ts >= MOTION_CONFIRM_SEC
 
 
 def _is_stationary(slot: dict, now: float) -> bool:
@@ -241,22 +278,30 @@ def _is_stationary(slot: dict, now: float) -> bool:
     if old_pos is None:
         return False   # 아직 그만큼 데이터가 없음
 
-    # 구간 경계의 단일 잡음도 기준점을 왜곡하지 않도록 중앙값 사용
+    # 구간 경계의 잡음(짧은 가림 포함)이 기준점을 왜곡하지 않도록,
+    # 기준 시점 앞 REFERENCE_SEC 구간(최소 REFERENCE_SAMPLES개)의 중앙값을 쓴다
+    ref_from = positions[old_index][0] - REFERENCE_SEC
     start = max(0, old_index - REFERENCE_SAMPLES + 1)
-    reference = _median_center(positions[start:start + REFERENCE_SAMPLES])
+    while start > 0 and positions[start - 1][0] >= ref_from:
+        start -= 1
+    reference = _median_center(positions[start:old_index + 1])
     consecutive = 0
-    for _, pos in positions[old_index + 1:]:
+    run_start = None
+    for ts, pos in positions[old_index + 1:]:
         if _distance(reference, pos) >= MOVE_THRESHOLD_PX:
+            if consecutive == 0:
+                run_start = ts
             consecutive += 1
-            if consecutive >= MOTION_CONFIRM_SAMPLES:
+            if _motion_confirmed(consecutive, run_start, ts):
                 return False
         else:
             consecutive = 0
     areas = slot["areas"]
-    area_reference = median(a for _, a in areas[start:start + REFERENCE_SAMPLES])
+    area_reference = median(a for _, a in areas[start:old_index + 1])
     consecutive = 0
     last_direction = 0
-    for _, area in areas[old_index + 1:]:
+    run_start = None
+    for ts, area in areas[old_index + 1:]:
         # 위 update() 와 같은 기준: 같은 방향으로 연속해야 실제 이동으로 본다.
         # 방향이 뒤집히는 것은 검출 박스 떨림이므로 다시 센다.
         direction = _area_change_direction(area_reference, area)
@@ -267,8 +312,10 @@ def _is_stationary(slot: dict, now: float) -> bool:
         if direction != last_direction:
             consecutive = 0
             last_direction = direction
+        if consecutive == 0:
+            run_start = ts
         consecutive += 1
-        if consecutive >= MOTION_CONFIRM_SAMPLES:
+        if _motion_confirmed(consecutive, run_start, ts):
             return False
     return True
 
@@ -276,6 +323,7 @@ def _is_stationary(slot: dict, now: float) -> bool:
 def reset() -> None:
     """모니터링 시작/정지 시 모든 상태 초기화"""
     _slots.clear()
+    _last_hits.clear()
 
 
 def get_slot_count() -> int:

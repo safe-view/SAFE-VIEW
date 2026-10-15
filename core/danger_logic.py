@@ -121,7 +121,9 @@ def check_danger(detections: list, roi_polygon) -> dict:
     cars    = [d for d in detections if d["class_name"] == "car"]
 
     # 정지 차량은 위험 판단에서 제외 (이동 가능성이 있는 차량만 위험 요소로 간주)
-    active_cars = [c for c in cars if not c.get("is_parked", False)]
+    # 처음 보는 차는 여러 번 잡혀 확인된 뒤에만 위험 요소로 본다 (car_confirmed 가 없으면 확인된 것으로 취급)
+    active_cars = [c for c in cars
+                   if not c.get("is_parked", False) and c.get("car_confirmed", True)]
 
     result = {
         "is_danger":         False,

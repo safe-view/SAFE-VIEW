@@ -122,6 +122,15 @@ def verify_danger():
         got = check_danger(detections, roi)["is_danger"]
         check(label, got == expected, f"기대 {expected} / 실제 {got}")
 
+    # 이슈 #32 — 처음 보는 차는 CAR_MIN_HITS 번 잡혀야 위험 요소 (1프레임 중복 박스 제외)
+    unconfirmed = {**fake_det("car", 320, 300), "car_confirmed": False}
+    confirmed = {**fake_det("car", 320, 300), "car_confirmed": True}
+    person = fake_det("person", 300, 300)
+    got = check_danger([person, unconfirmed], roi)["is_danger"]
+    check("ROI 안 사람+확인 전 새 차량 → 위험 아님", got is False, f"실제 {got}")
+    got = check_danger([person, confirmed], roi)["is_danger"]
+    check("ROI 안 사람+확인된 차량 → 위험", got is True, f"실제 {got}")
+
 
 def verify_multi_roi():
     print("\n[R1] 여러 ROI 위험 판정 (도로 양쪽 보행 구역)")

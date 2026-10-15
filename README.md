@@ -65,7 +65,7 @@ streamlit run app.py
 
 모니터링 화면은 최신 프레임 1장만 남기고 추론하므로, **추론 1회에 걸리는 시간**이 곧 검출 박스가 실제 움직임보다 얼마나 뒤처지는지를 결정한다. 이 시간을 줄이려고 OpenVINO 런타임 경로를 넣어 뒀다.
 
-기본값은 기존과 같은 PyTorch(`INFER_BACKEND = "pytorch"`)다. **측정해 보고 켜야 한다.**
+기본값은 `INFER_BACKEND = "auto"`다. NVIDIA GPU(CUDA) → OpenVINO(내보낸 모델이 있을 때) → PyTorch CPU 순서로 고른다. 앱 실행 중에는 추론이 메인 루프와 CPU를 나눠 쓰므로 GPU 경로의 이득이 단독 측정보다 크다(같은 PC에서 PyTorch CPU 약 207 ms, OpenVINO GPU 약 30 ms).
 
 ```
 python tools/export_openvino.py     # yolov8n_openvino_model/ 생성 (한 번만)
@@ -77,15 +77,27 @@ Intel Core Ultra 5 125H / Windows 11 에서 측정한 결과는 다음과 같다
 
 | 구성 | 추론 지연 | PyTorch 대비 |
 |---|---|---|
-| PyTorch (기본값) | 약 60 ms | 기준 |
+| PyTorch CPU | 약 60 ms | 기준 |
 | OpenVINO CPU | 95~124 ms | **느려짐** |
 | OpenVINO GPU | 약 25 ms | **2.5배 빠름** (첫 로드 40~80초) |
 
-CPU에서 느린 이유는 ultralytics가 Windows에서 OpenVINO CPU 정밀도를 FP32로 고정하기 때문이다. 쓸 만한 구성은 Intel 내장 그래픽(GPU)뿐이고, 대신 앱을 켤 때마다 커널 컴파일로 40~80초가 걸린다. 상시 감시용이면 켤 만하고, 자주 껐다 켜는 개발·시연 중에는 기본값이 낫다.
+CPU에서 느린 이유는 ultralytics가 Windows에서 OpenVINO CPU 정밀도를 FP32로 고정하기 때문이다. 쓸 만한 구성은 Intel 내장 그래픽(GPU)뿐이고, 대신 앱을 켤 때마다 커널 컴파일로 40~80초가 걸린다. 상시 감시용이면 켤 만하고, 자주 껐다 켜는 개발·시연 중에는 `INFER_BACKEND = "pytorch"`가 낫다.
 
-켜려면 `config.py`에서 `INFER_BACKEND = "openvino"`, `OPENVINO_DEVICE = "GPU"` 로 바꾼다. `openvino`가 없거나 모델을 내보내지 않았으면 자동으로 `yolov8n.pt`로 되돌아가므로 이 단계를 건너뛰어도 된다. 생성된 모델 폴더는 커밋하지 않는다.
+`auto`에서 OpenVINO를 쓰려면 위 명령으로 모델을 내보내 두고 `OPENVINO_DEVICE = "GPU"`로 둔다. 특정 백엔드로 고정하려면 `INFER_BACKEND`를 `"openvino"` 또는 `"pytorch"`로 바꾼다. `openvino`가 없거나 모델을 내보내지 않았으면 자동으로 `yolov8n.pt`로 되돌아가므로 이 단계를 건너뛰어도 된다. 생성된 모델 폴더는 커밋하지 않는다.
 
 위 수치는 PC 한 대 기준이므로, 자기 PC에서 `tools/bench_detector.py`로 직접 재보고 판단하면 된다.
+
+#### NVIDIA GPU
+
+NVIDIA 외장 GPU가 있으면 PyTorch 경로가 CUDA를 자동으로 쓴다. `INFER_BACKEND`가 `"auto"`면 CUDA가 OpenVINO보다 먼저 선택된다. 단, 기본 `pip install`로 깔리는 torch는 CPU 전용이므로 CUDA 빌드로 다시 설치해야 한다.
+
+```
+pip uninstall -y torch torchvision
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+python -c "import torch; print(torch.cuda.is_available())"   # True 가 나와야 함
+```
+
+`cu126`은 CUDA 버전이며, 설치된 NVIDIA 드라이버가 지원하는 버전을 https://pytorch.org/get-started/locally/ 에서 확인해 고른다. CUDA가 잡히지 않으면 경고 없이 기존처럼 CPU(또는 OpenVINO)로 동작한다.
 
 CCTV를 쓰려면 rtsp_presets.json 파일을 만들어서 RTSP 주소를 등록하면 된다. 형식은 다음과 같다.
 

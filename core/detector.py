@@ -3,6 +3,7 @@
 #
 # 추론 백엔드는 config.INFER_BACKEND로 고릅니다. OpenVINO로 내보낸 모델이
 # 있으면 그것을 쓰고, 없으면 기존 yolov8n.pt로 그대로 동작합니다.
+# PyTorch 경로는 NVIDIA GPU(CUDA)가 잡히면 GPU에서, 아니면 CPU에서 돕니다.
 # 어느 쪽이든 detect()가 돌려주는 딕셔너리 형식은 동일합니다.
 #
 # config.USE_TRACKER가 켜져 있으면 ByteTrack으로 차량마다 ID를 붙여
@@ -32,6 +33,15 @@ def openvino_available() -> bool:
     return True
 
 
+def cuda_available() -> bool:
+    """CUDA 빌드 torch 가 설치돼 있고 NVIDIA GPU 가 잡히는지 확인합니다."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
 class Detector:
     """
     YOLOv8 기반 객체 탐지기.
@@ -40,7 +50,7 @@ class Detector:
     속성:
         loaded         — 모델 로드 성공 여부
         backend        — 실제로 쓰이는 백엔드 ('openvino' 또는 'pytorch')
-        device         — 추론 디바이스 표기 (OpenVINO일 때만 의미 있음)
+        device         — 추론 디바이스 표기 ('CPU' / 'CUDA' / OpenVINO 디바이스)
         last_infer_ms  — 가장 최근 detect() 1회에 걸린 추론 시간(ms)
         load_warning   — OpenVINO 로드에 실패해 폴백했을 때의 사유 (없으면 None)
     """
@@ -51,6 +61,7 @@ class Detector:
         self.backend = "pytorch"
         self._ov_device = device.upper()   # OpenVINO 로 갔을 때 쓸 디바이스
         self.device = "CPU"                # 실제로 추론이 도는 곳 (화면 표시용)
+        self._torch_device = "cpu"         # PyTorch 로 갔을 때 ultralytics 에 넘길 디바이스
         self.last_infer_ms = 0.0
         self.load_warning = None
         self.load_error = None
@@ -70,9 +81,14 @@ class Detector:
             print(f"[Detector] 알 수 없는 INFER_BACKEND='{backend}' → 'auto'로 처리합니다.")
             backend = "auto"
 
+        # 'auto'의 우선순위: NVIDIA GPU(CUDA) → OpenVINO → PyTorch CPU
+        has_cuda = cuda_available()
+
         # ── 1) OpenVINO 백엔드 시도 ────────────────────────
-        # 'auto'는 준비된 경우에만, 'openvino'는 명시적으로 요청된 경우 시도합니다.
-        want_openvino = backend == "openvino" or (backend == "auto" and openvino_available())
+        # 'auto'는 CUDA가 없고 준비된 경우에만, 'openvino'는 명시적으로 요청된 경우 시도합니다.
+        want_openvino = backend == "openvino" or (
+            backend == "auto" and not has_cuda and openvino_available()
+        )
         if want_openvino:
             try:
                 if not os.path.isdir(OPENVINO_MODEL_DIR):
@@ -95,6 +111,9 @@ class Detector:
             try:
                 self.model = YOLO(model_name)
                 self.backend = "pytorch"
+                if has_cuda:
+                    self._torch_device = "cuda:0"
+                    self.device = "CUDA"
                 self.loaded = True
             except Exception as e:
                 self.load_error = str(e)
@@ -137,6 +156,8 @@ class Detector:
             # 디바이스를 명시하지 않으면 ultralytics 가 "AUTO"를 쓰는데,
             # 측정 결과 AUTO 가 CPU 직접 지정보다 느렸습니다(config 주석 참고).
             kwargs["device"] = f"intel:{self.device.lower()}"
+        else:
+            kwargs["device"] = self._torch_device
 
         if self.tracking:
             try:

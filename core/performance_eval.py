@@ -9,6 +9,7 @@
 import os
 import csv
 import sys
+import uuid
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,16 +19,28 @@ EVAL_LOG = os.path.join(LOGS_DIR, "performance_eval.csv")
 
 # 평가 결과 카테고리
 CATEGORIES = ["정탐 (TP)", "오탐 (FP)", "미탐 (FN)", "정상 (TN)"]
+FIELDNAMES = [
+    "id", "timestamp", "scenario", "source",
+    "result", "response_time_sec", "notes",
+]
+
+
+def _new_record_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def _write_records(records: list[dict]) -> None:
+    with open(EVAL_LOG, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(records)
 
 
 def _ensure_file():
     os.makedirs(LOGS_DIR, exist_ok=True)
     if not os.path.exists(EVAL_LOG):
         with open(EVAL_LOG, "w", newline="", encoding="utf-8-sig") as f:
-            csv.writer(f).writerow([
-                "timestamp", "scenario", "source",
-                "result", "response_time_sec", "notes",
-            ])
+            csv.writer(f).writerow(FIELDNAMES)
 
 
 def add_record(scenario: str, source: str, result: str,
@@ -39,6 +52,7 @@ def add_record(scenario: str, source: str, result: str,
     try:
         with open(EVAL_LOG, "a", newline="", encoding="utf-8-sig") as f:
             csv.writer(f).writerow([
+                _new_record_id(),
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 scenario, source, result,
                 f"{response_time_sec:.2f}" if response_time_sec else "",
@@ -56,28 +70,28 @@ def load_records() -> list[dict]:
         return []
     try:
         with open(EVAL_LOG, "r", encoding="utf-8-sig") as f:
-            return list(csv.DictReader(f))
+            reader = csv.DictReader(f)
+            records = list(reader)
+            has_id_column = reader.fieldnames is not None and "id" in reader.fieldnames
+
+        if records and not has_id_column:
+            records = [{"id": _new_record_id(), **record} for record in records]
+            _write_records(records)
+        return records
     except Exception:
         return []
 
 
-def delete_record(timestamp: str) -> bool:
-    """특정 timestamp 기록 삭제"""
+def delete_record(record_id: str) -> bool:
+    """특정 ID의 평가 기록 삭제"""
     records = load_records()
     if not records:
         return False
-    filtered = [r for r in records if r.get("timestamp") != timestamp]
+    filtered = [r for r in records if r.get("id") != record_id]
     if len(filtered) == len(records):
         return False
     try:
-        with open(EVAL_LOG, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=["timestamp", "scenario", "source",
-                            "result", "response_time_sec", "notes"],
-            )
-            writer.writeheader()
-            writer.writerows(filtered)
+        _write_records(filtered)
         return True
     except Exception:
         return False

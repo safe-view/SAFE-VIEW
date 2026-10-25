@@ -7,7 +7,7 @@
 **승인 필요:** (다음 작업 시작 시 작성)
 **최종 갱신:** (다음 작업 시작 시 작성)
 
-현재 진행 중인 작업이 없다. 직전 작업("이벤트 클립 저장 on/off 위젯")은 `verified`로 종료되어 `docs/tasks/archive/2026-10-25-event-clip-save-toggle-verified.md`로 이동했다.
+현재 진행 중인 작업이 없다. 직전 작업("성능평가 기록 삭제 버그 수정")은 `verified`로 종료되어 `docs/tasks/archive/2026-10-25-fix-eval-delete-collision-verified.md`로 이동했다.
 
 ## 1. 목표
 

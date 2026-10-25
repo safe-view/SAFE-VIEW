@@ -61,6 +61,18 @@ streamlit run app.py
 
 자동으로 http://localhost:8501 이 열린다.
 
+### 성능 평가 자동화
+
+`data/eval_ground_truth.json`에 영상 파일명별 실제 위험 구간을 `[시작초, 끝초]` 형식으로 적은 뒤 아래 명령을 실행한다. 위험이 없는 정상 영상은 `"danger_intervals": []`로 적는다. 정답지에 없는 영상 목록은 `--list-unlabeled`, CSV 기록 없이 결과만 확인하려면 `--dry-run`을 붙인다.
+
+```bash
+python tools/auto_eval.py
+python tools/auto_eval.py --video "(2)갑툭튀(야간)-카메라.mp4" --dry-run
+python tools/auto_eval.py --list-unlabeled
+```
+
+평가 결과는 기존 `logs/performance_eval.csv`에 `[자동평가]` 접두사로 기록되며 성능 평가 페이지에서 함께 집계된다. 같은 영상을 다시 평가하면 그 영상의 이전 자동 기록은 새 결과로 교체된다. ROI가 없는 영상은 먼저 ROI 설정 페이지에서 ROI를 저장해야 한다.
+
 ### 추론 속도 높이기 (선택)
 
 모니터링 화면은 최신 프레임 1장만 남기고 추론하므로, **추론 1회에 걸리는 시간**이 곧 검출 박스가 실제 움직임보다 얼마나 뒤처지는지를 결정한다. 이 시간을 줄이려고 OpenVINO 런타임 경로를 넣어 뒀다.

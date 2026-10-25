@@ -704,6 +704,16 @@ with main_col:
 with status_col:
     status_ph = st.empty()
     alert_ph  = st.empty()
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    save_clip_choice = st.radio(
+        "🎬 이벤트 클립 저장",
+        ["ON", "OFF"],
+        index=0,
+        horizontal=True,
+        key="save_clip_choice",
+        help="꺼두면 위험 이벤트의 스냅샷 이미지와 로그는 그대로 남지만, 영상 클립은 저장하지 않습니다.",
+    )
+    st.session_state.save_clip_enabled = (save_clip_choice == "ON")
     events_ph = st.empty()
     sound_ph  = st.empty()   # 위험 시 components.html로 audio autoplay 삽입
 
@@ -966,11 +976,14 @@ while st.session_state.running:
     # ── 이벤트 저장 ──────────────────────────────────────
     if event_triggered and not st.session_state.post_recording:
         img_name, _ = save_event_image(annotated, st.session_state.source_name)
-        st.session_state.pending_img_name = img_name
-        st.session_state.pre_frames       = list(st.session_state.frame_buffer)
-        st.session_state.post_frames      = []
-        st.session_state.post_recording   = True
-        st.session_state.post_rec_start   = now
+        if st.session_state.get("save_clip_enabled", True):
+            st.session_state.pending_img_name = img_name
+            st.session_state.pre_frames       = list(st.session_state.frame_buffer)
+            st.session_state.post_frames      = []
+            st.session_state.post_recording   = True
+            st.session_state.post_rec_start   = now
+        else:
+            log_event(st.session_state.source_name, img_name, None)
 
     if st.session_state.post_recording:
         st.session_state.post_frames.append(annotated.copy())

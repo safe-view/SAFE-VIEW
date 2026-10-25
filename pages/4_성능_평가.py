@@ -107,7 +107,7 @@ if not records:
 else:
     # 최신순 정렬 + DataFrame 표시
     df_records = list(reversed(records))
-    df = pd.DataFrame(df_records)
+    df = pd.DataFrame(df_records).drop(columns=["id"], errors="ignore")
 
     # 컬럼 한글화
     df_display = df.rename(columns={
@@ -122,13 +122,17 @@ else:
 
     # 개별 삭제
     with st.expander("🗑️ 기록 삭제"):
-        del_ts = st.selectbox(
+        record_by_id = {r["id"]: r for r in df_records}
+        record_id = st.selectbox(
             "삭제할 기록 선택",
-            [f"{r['timestamp']} | {r.get('scenario', '')}" for r in df_records],
+            list(record_by_id),
+            format_func=lambda value: (
+                f"{record_by_id[value]['timestamp']} | "
+                f"{record_by_id[value].get('scenario', '')}"
+            ),
         )
         if st.button("선택한 기록 삭제", type="secondary"):
-            timestamp_to_del = del_ts.split(" | ")[0]
-            if delete_record(timestamp_to_del):
+            if delete_record(record_id):
                 st.success("삭제되었습니다.")
                 st.rerun()
             else:

@@ -326,30 +326,21 @@ def classify_intervals(alarm_intervals, danger_intervals):
 
 
 def remove_previous_auto_records(video_name):
+    # core.performance_eval이 각 기록에 고유 id를 부여하므로(성능평가 기록 삭제
+    # 버그 수정), 같은 타임스탬프를 가진 다른 기록과 충돌할 걱정 없이 id로
+    # 안전하게 지울 수 있다.
     records = load_records()
-    timestamps = {
-        record.get("timestamp", "")
+    record_ids = [
+        record["id"]
         for record in records
         if record.get("source") == video_name
         and record.get("scenario", "").startswith(AUTO_PREFIX)
-    }
-    collisions = [
-        record for record in records
-        if record.get("timestamp", "") in timestamps
-        and not (
-            record.get("source") == video_name
-            and record.get("scenario", "").startswith(AUTO_PREFIX)
-        )
+        and record.get("id")
     ]
-    if collisions:
-        raise RuntimeError(
-            "기존 자동평가 기록의 타임스탬프를 다른 기록도 사용 중이라 "
-            "안전하게 교체할 수 없습니다. 성능 평가 페이지에서 해당 자동 기록을 삭제해 주세요."
-        )
-    for timestamp in sorted(timestamps):
-        if timestamp and not delete_record(timestamp):
-            raise RuntimeError(f"기존 자동평가 기록을 삭제하지 못했습니다: {timestamp}")
-    return len(timestamps)
+    for record_id in record_ids:
+        if not delete_record(record_id):
+            raise RuntimeError(f"기존 자동평가 기록을 삭제하지 못했습니다: {record_id}")
+    return len(record_ids)
 
 
 def save_results(video_name, results):

@@ -51,7 +51,22 @@ html, body {{
     background: var(--sv-bg);
 }}
 header[data-testid="stHeader"] {{
-    display: none !important;
+    display: block !important;
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    z-index: 999999;
+    visibility: hidden;
+}}
+header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] {{
+    visibility: visible !important;
+    color: #4CAF50 !important;
+}}
+header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] * {{
+    color: #4CAF50 !important;
 }}
 .block-container {{
     padding-top: 0.75rem !important;
@@ -110,8 +125,9 @@ footer {{visibility: hidden;}}
     box-shadow: inset 3px 0 0 var(--sv-blue);
     font-weight: 700;
 }}
-[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] button {{
-    color: #CBD5E1 !important;
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapseButton"] button * {{
+    color: #4CAF50 !important;
 }}
 /* Streamlit 1.55의 헤더가 로고와 내비게이션 사이에서 높이와 하단 여백을 차지하므로,
    접기 버튼은 유지한 채 문서 흐름에서만 분리한다. */

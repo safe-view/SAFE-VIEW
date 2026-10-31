@@ -44,7 +44,7 @@ def _ensure_file():
 
 
 def add_record(scenario: str, source: str, result: str,
-               response_time_sec: float = 0.0, notes: str = "") -> bool:
+               response_time_sec: float | None = None, notes: str = "") -> bool:
     """평가 기록 한 건 추가"""
     if result not in CATEGORIES:
         return False
@@ -55,7 +55,7 @@ def add_record(scenario: str, source: str, result: str,
                 _new_record_id(),
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 scenario, source, result,
-                f"{response_time_sec:.2f}" if response_time_sec else "",
+                f"{response_time_sec:.2f}" if response_time_sec is not None else "",
                 notes,
             ])
         return True
@@ -113,12 +113,12 @@ def compute_metrics(records: list[dict]) -> dict:
         result = r.get("result", "")
         if result in counts:
             counts[result] += 1
-        try:
-            rt = float(r.get("response_time_sec") or 0)
-            if rt > 0:
-                rt_values.append(rt)
-        except ValueError:
-            pass
+        raw = r.get("response_time_sec")
+        if raw not in (None, ""):
+            try:
+                rt_values.append(float(raw))
+            except ValueError:
+                pass
 
     tp = counts["정탐 (TP)"]
     fp = counts["오탐 (FP)"]

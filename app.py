@@ -320,6 +320,7 @@ pg = st.navigation([
     st.Page("pages/2_ROI_설정.py",          title="ROI 설정",       icon="🗺️"),
     st.Page("pages/3_이벤트_다시보기.py",    title="세이프뷰 다시보기",  icon="📋"),
     st.Page("pages/4_성능_평가.py",          title="성능 평가",         icon="📊"),
+    st.Page("pages/5_탐지_정산.py",          title="탐지 정산",         icon="🧾"),
 ])
 
 pg.run()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import os
 import sys
@@ -28,13 +27,11 @@ from config import (  # noqa: E402
 from core import parked_detector  # noqa: E402
 from core.danger_logic import check_danger, hold_person_boxes, update_danger_hold  # noqa: E402
 from core.detector import Detector  # noqa: E402
+from core.ground_truth import DATA_DIR, load_ground_truth, video_files  # noqa: E402
 from core.performance_eval import add_record, delete_record, load_records  # noqa: E402
 from core.roi_manager import load_rois  # noqa: E402
 
 
-DATA_DIR = PROJECT_ROOT / "data"
-GROUND_TRUTH_PATH = DATA_DIR / "eval_ground_truth.json"
-VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".m4v"}
 AUTO_PREFIX = "[자동평가] "
 
 TP = "정탐 (TP)"
@@ -119,48 +116,6 @@ def parse_args():
         help="CSV를 변경하지 않고 결과만 출력",
     )
     return parser.parse_args()
-
-
-def load_ground_truth():
-    try:
-        with GROUND_TRUTH_PATH.open("r", encoding="utf-8") as file:
-            raw = json.load(file)
-    except FileNotFoundError as exc:
-        raise ValueError(f"정답지 파일이 없습니다: {GROUND_TRUTH_PATH}") from exc
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"정답지 JSON 형식이 잘못됐습니다: {exc}") from exc
-
-    if not isinstance(raw, dict):
-        raise ValueError("정답지 최상위 값은 영상 파일명을 키로 하는 객체여야 합니다.")
-
-    ground_truth = {}
-    for video_name, entry in raw.items():
-        if not isinstance(video_name, str) or not isinstance(entry, dict):
-            raise ValueError("각 정답지 항목은 영상 파일명과 객체여야 합니다.")
-        intervals = entry.get("danger_intervals")
-        if not isinstance(intervals, list):
-            raise ValueError(f"{video_name}: danger_intervals는 리스트여야 합니다.")
-        normalized = []
-        for interval in intervals:
-            if (not isinstance(interval, list) or len(interval) != 2
-                    or isinstance(interval[0], bool) or isinstance(interval[1], bool)
-                    or not isinstance(interval[0], (int, float))
-                    or not isinstance(interval[1], (int, float))):
-                raise ValueError(f"{video_name}: 각 구간은 [시작초, 끝초]여야 합니다.")
-            start, end = map(float, interval)
-            if start < 0 or end <= start:
-                raise ValueError(f"{video_name}: 구간은 0 <= 시작초 < 끝초여야 합니다.")
-            normalized.append((start, end))
-        ground_truth[video_name] = normalized
-    return ground_truth
-
-
-def video_files():
-    return sorted(
-        path.name
-        for path in DATA_DIR.iterdir()
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
-    )
 
 
 def list_unlabeled(ground_truth):
@@ -349,11 +304,12 @@ def save_results(video_name, results):
         print(f"  기존 자동평가 기록 삭제: {removed}개 타임스탬프")
     scenario = f"{AUTO_PREFIX}{video_name}"
     for result in results:
+        response_time = result["response_time"] if result["result"] == TP else None
         if not add_record(
             scenario=scenario,
             source=video_name,
             result=result["result"],
-            response_time_sec=result["response_time"],
+            response_time_sec=response_time,
             notes=result["notes"],
         ):
             raise RuntimeError(f"평가 기록 저장 실패: {video_name} / {result['result']}")

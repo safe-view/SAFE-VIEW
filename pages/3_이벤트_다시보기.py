@@ -6,7 +6,6 @@ import os
 import sys
 import csv
 import calendar
-import subprocess
 from datetime import datetime, date
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,6 +14,7 @@ if ROOT not in sys.path:
 
 from config import EVENTS_DIR, LOG_FILE
 from core.event_saver import delete_event
+from core.video_playback import get_playable_video
 
 # ── 페이지 설정 ────────────────────────────────────────
 # st.set_page_config는 app.py에서 1회만 호출
@@ -127,17 +127,6 @@ def get_dates_with_events(events):
 # ── 영상 변환 ──────
 CONVERTED_DIR = os.path.join(EVENTS_DIR, "_converted")
 os.makedirs(CONVERTED_DIR, exist_ok=True)
-
-def get_playable_video(clip_path: str) -> str | None:
-    filename = os.path.basename(clip_path)
-    converted_path = os.path.join(CONVERTED_DIR, filename)
-    if os.path.exists(converted_path): return converted_path
-    try:
-        from imageio_ffmpeg import get_ffmpeg_exe
-        ffmpeg = get_ffmpeg_exe()
-        subprocess.run([ffmpeg, "-y", "-i", clip_path, "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-movflags", "+faststart", "-an", converted_path], capture_output=True, timeout=30)
-        return converted_path if os.path.exists(converted_path) else None
-    except Exception: return None
 
 all_events = load_all_events()
 event_dates = get_dates_with_events(all_events)
@@ -278,7 +267,11 @@ with content_col:
                     clip_path = os.path.join(EVENTS_DIR, clip_file)
                     if os.path.exists(clip_path):
                         with st.spinner("미디어 로딩 중..."):
-                            playable = get_playable_video(clip_path)
+                            playable = get_playable_video(
+                                clip_path,
+                                cache_dir=CONVERTED_DIR,
+                                timeout_sec=30.0,
+                            )
                         if playable:
                             with open(playable, "rb") as vf: st.video(vf.read())
                         else:

@@ -7,7 +7,7 @@
 **승인 필요:** (다음 작업 시작 시 작성)
 **최종 갱신:** (다음 작업 시작 시 작성)
 
-현재 진행 중인 작업이 없다. 직전 작업("성능평가 기록 삭제 버그 수정")은 `verified`로 종료되어 `docs/tasks/archive/2026-10-25-fix-eval-delete-collision-verified.md`로 이동했다(그 전 작업 "성능 평가 자동화 스크립트 추가"는 `docs/tasks/archive/2026-10-25-auto-performance-eval-verified.md` 참고).
+현재 진행 중인 작업이 없다. 직전 작업("성능평가 — 위험 발생 구간 입력 화면 + 자동 평가 실행 + 페이지 UI 개선")은 `verified`로 종료되어 `docs/tasks/archive/2026-10-31-ground-truth-input-and-auto-eval-ui-verified.md`로 이동했다.
 
 ## 1. 목표
 

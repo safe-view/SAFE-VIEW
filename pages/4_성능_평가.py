@@ -224,8 +224,10 @@ else:
     st.markdown("#### 입력된 위험 구간")
     if intervals:
         for index, (start, end) in enumerate(intervals):
-            interval_col, delete_col = st.columns([5, 1])
-            interval_col.write(f"{start:g}초 ~ {end:g}초")
+            interval_col, delete_col, _ = st.columns([2, 1, 7], vertical_alignment="center")
+            with interval_col:
+                with st.container(border=True):
+                    st.write(f"{start:g}초 ~ {end:g}초")
             if delete_col.button("삭제", key=f"delete_ground_truth_{index}"):
                 intervals.pop(index)
                 st.session_state.ground_truth_intervals = intervals

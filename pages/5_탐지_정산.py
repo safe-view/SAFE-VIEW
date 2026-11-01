@@ -1,9 +1,10 @@
 # pages/5_탐지_정산.py — 탐지 정산 페이지
 # logs/events_log.csv 에 쌓인 실제 위험 관측 기록을 종합해 보여준다. (읽기 전용)
-# 대상은 RTSP 실시간 모니터링이 쌓는 기록이다. 기록이 없어도 축·격자·히트맵 틀은 그대로 보이도록 빈 상태를 따로 그린다.
+# RTSP 실시간 모니터링 기록만 집계한다. (로컬 녹화영상 파일에서 나온 기록은 제외)
+# 기록이 없어도 축·격자 틀은 그대로 보이도록 빈 상태를 따로 그린다.
 
 import streamlit as st
-import os, sys, html
+import os, sys, html, json, re
 import pandas as pd
 import altair as alt
 from datetime import datetime, timedelta
@@ -14,11 +15,34 @@ if ROOT not in sys.path:
 
 from config import EVENTS_DIR, LOG_FILE
 
+PRESET_FILE = os.path.join(ROOT, "rtsp_presets.json")
+
+
+def rtsp_preset_names() -> set:
+    """rtsp_presets.json 에 등록된 CCTV 이름 모음. 파일이 없거나 깨지면 빈 집합."""
+    try:
+        with open(PRESET_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(p.get("name", "")).strip() for p in data if isinstance(p, dict)} - {""}
+    except Exception:
+        return set()
+
+
+def is_rtsp(source: str, names: set) -> bool:
+    """RTSP 실시간 소스인지 판별한다. rtsp:// 주소이거나 등록된 프리셋 이름이면 True."""
+    s = str(source).strip()
+    return s.lower().startswith("rtsp://") or s in names
+
+
+def mask(source: str) -> str:
+    """소스에 rtsp://아이디:비밀번호@ 가 섞여 있어도 화면에는 계정 정보를 드러내지 않는다."""
+    return re.sub(r"(rtsp://)[^@/\s]+@", r"\1***@", str(source), flags=re.I)
+
+
 WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 GREEN = "#4D9F50"
 DANGER = "#C0392B"
 MUTED = "#D5DCE3"
-HEAT = ["#F1F2F4", "#EBB7B0", "#DD8F88", "#CD6A64", "#C0392B"]
 
 st.markdown("""
 <style>
@@ -52,12 +76,6 @@ st.markdown("""
 .td-rank em { width:4.2rem; text-align:right; font-style:normal; color:#475569; font-size:.88rem; }
 .td-legend { color:#64748B; font-size:.85rem; }
 .td-legend i { display:inline-block; width:11px; height:11px; border-radius:3px; margin:0 .35rem 0 .9rem; }
-.td-heat { display:grid; grid-template-columns:2rem repeat(24, 1fr) 3rem; gap:4px; align-items:center; }
-.td-heat .hd { color:#64748B; font-size:.8rem; text-align:left; height:1.2rem; }
-.td-heat .wd { color:#334155; font-size:.9rem; font-weight:600; }
-.td-heat .wd.we { color:#DC2626; }
-.td-heat .c { height:38px; border-radius:6px; }
-.td-heat .sum { text-align:right; color:#334155; font-size:.9rem; }
 .td-case { border-radius:14px; border:1px solid #E2E8F0; background:#fff; padding:.8rem .9rem; margin-top:.5rem;
     font-size:.88rem; color:#475569; }
 .td-case strong { color:#0F172A; }
@@ -84,6 +102,8 @@ def load_events() -> pd.DataFrame:
     for col in cols:
         if col not in df.columns:
             df[col] = ""
+    names = rtsp_preset_names()
+    df = df[df["source"].map(lambda s: is_rtsp(s, names))].copy()  # 녹화영상(로컬 파일) 기록 제외
     df["ts"] = pd.to_datetime(df["timestamp"], errors="coerce")
     df = df.dropna(subset=["ts"]).copy()
     df["date"] = df["ts"].dt.date
@@ -116,16 +136,16 @@ def render():
     today = datetime.now().date()
 
     # ── 상단: 제목 / 기간 / 새로고침 ──────────────────────
-    badge = ('<span class="td-badge">● 실시간 집계 중</span>' if len(all_events)
-             else '<span class="td-badge idle">● 실시간 대기 중</span>')
-    st.markdown(f'<div class="td-top"><h1>탐지 정산</h1>{badge}</div>', unsafe_allow_html=True)
+    badge = ('<span class="td-badge">● RTSP 실시간 집계 중</span>' if len(all_events)
+             else '<span class="td-badge idle">● RTSP 실시간 대기 중</span>')
+    st.markdown(f'<div class="td-top"><h1>탐지 정산 · RTSP</h1>{badge}</div>', unsafe_allow_html=True)
 
-    c_period, c_src, c_range, c_ref = st.columns([2.2, 2.4, 3, 1])
+    c_period, c_src, c_range = st.columns([2.2, 2.4, 4])
     period = c_period.segmented_control("집계 기간", ["최근 7일", "최근 30일", "전체"],
                                         default="최근 30일", label_visibility="collapsed") or "최근 30일"
     sources = sorted(s for s in all_events["source"].unique() if s)
-    picked = c_src.multiselect("영상 소스", sources, default=sources, placeholder="영상 소스 (전체)",
-                               label_visibility="collapsed", disabled=not sources)
+    picked = c_src.multiselect("영상 소스", sources, default=sources, placeholder="RTSP 소스 (전체)",
+                               format_func=mask, label_visibility="collapsed", disabled=not sources)
 
     events = all_events[all_events["source"].isin(picked)] if sources and picked else all_events
     if period == "전체":
@@ -138,8 +158,6 @@ def render():
 
     c_range.markdown(
         f'<div class="td-range">{start} ~ {today} · 집계 {datetime.now():%H:%M}</div>', unsafe_allow_html=True)
-    if c_ref.button("🔄 새로고침", width="stretch"):
-        st.rerun()
 
     # ── 집계 ─────────────────────────────────────────────
     total = len(view)
@@ -252,7 +270,7 @@ def render():
             mx = int(sc.max())
             body = "".join(
                 f'<div class="td-rank"><b style="width:7rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;'
-                f'white-space:nowrap" title="{html.escape(s)}">{html.escape(s)}</b><div class="td-bar"><div style="width:{c / mx * 100:.0f}%;'
+                f'white-space:nowrap" title="{html.escape(mask(s))}">{html.escape(mask(s))}</b><div class="td-bar"><div style="width:{c / mx * 100:.0f}%;'
                 f'background:{GREEN}"></div></div><em>{c}건</em></div>' for s, c in sc.head(8).items())
         else:
             body = '<div class="td-empty">데이터 없음</div>'
@@ -260,43 +278,19 @@ def render():
 
     st.write("")
 
-    # ── 요일 × 시간 히트맵 ────────────────────────────────
-    grid = pd.crosstab(view["weekday"], view["hour"]).reindex(index=range(7), columns=range(24), fill_value=0)
-    gmax = int(grid.values.max()) if total else 0
-
-
-    def level(v: int) -> int:
-        if v == 0 or gmax == 0:
-            return 0
-        return min(4, 1 + int((v - 1) * 4 / gmax))
-
-
-    cells = ['<div></div>' + "".join(f'<div class="hd">{h if h % 3 == 0 else ""}</div>' for h in range(24))
-             + '<div class="hd" style="text-align:right">합계</div>']
-    for wd in range(7):
-        row = [f'<div class="wd {"we" if wd >= 5 else ""}">{WEEKDAYS[wd]}</div>']
-        for h in range(24):
-            v = int(grid.loc[wd, h])
-            row.append(f'<div class="c" style="background:{HEAT[level(v)]}" title="{WEEKDAYS[wd]} {h:02d}시 · {v}건"></div>')
-        row.append(f'<div class="sum">{int(grid.loc[wd].sum())}</div>')
-        cells.append("".join(row))
-    legend = ('<div class="td-legend" style="text-align:right;margin-top:.7rem">적음'
-              + "".join(f'<i style="background:{c}"></i>' for c in HEAT) + '많음</div>')
-    st.markdown(card("요일 × 시간 히트맵", f"{period} · 진할수록 위험 발생이 잦은 시간",
-                     f'<div class="td-heat">{"".join(cells)}</div>{legend}'), unsafe_allow_html=True)
-
-    st.write("")
-
     # ── 최근 관측 사례 ───────────────────────────────────
     with st.container(border=True):
-        t1, t2 = st.columns([4, 1])
+        t1, t2, t3 = st.columns([3, 1.6, 1.4])
         t1.markdown(f'<div class="td-card-title" style="border:0;margin:0">최근 관측 사례<span>{period}</span></div>',
                     unsafe_allow_html=True)
+        show_cases = t2.toggle("사례 보기", value=False, key="td_show_cases")
         try:
-            t2.page_link("pages/3_이벤트_다시보기.py", label="이벤트 전체 보기 →")
+            t3.page_link("pages/3_이벤트_다시보기.py", label="이벤트 전체 보기 →")
         except Exception:  # 내비게이션 밖에서 단독 실행될 때는 링크만 생략
             pass
-        if total:
+        if not show_cases:
+            pass  # 토글을 켜기 전에는 이미지·사례를 읽지 않는다
+        elif total:
             recent = view.sort_values("ts", ascending=False).head(6)
             cols = st.columns(3)
             for i, (_, ev) in enumerate(recent.iterrows()):
@@ -310,7 +304,7 @@ def render():
                     tag = '<span class="td-tag">클립 있음</span>' if has_clip else '<span class="td-tag no">클립 없음</span>'
                     st.markdown(
                         f'<div class="td-case"><strong>{ev["ts"]:%Y-%m-%d %H:%M:%S}</strong> '
-                        f'({WEEKDAYS[int(ev["weekday"])]}){tag}<br>{html.escape(ev["source"]) or "-"}</div>',
+                        f'({WEEKDAYS[int(ev["weekday"])]}){tag}<br>{html.escape(mask(ev["source"])) or "-"}</div>',
                         unsafe_allow_html=True)
         else:
             st.markdown('<div class="td-empty">관측된 사례가 없습니다</div>', unsafe_allow_html=True)

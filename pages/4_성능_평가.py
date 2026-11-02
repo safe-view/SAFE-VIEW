@@ -31,7 +31,7 @@ st.markdown("""
 }
 </style>
 <div class="eval-heading">
-    <h1>📊 시스템 성능 평가</h1>
+    <h1>🧾 시스템 성능 평가</h1>
     <p>KISA 지능형 CCTV 성능시험 인증제도 평가 방식을 참고한 정량 성능 기록입니다.</p>
 </div>
 """, unsafe_allow_html=True)

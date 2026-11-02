@@ -46,12 +46,12 @@ MUTED = "#D5DCE3"
 
 st.markdown("""
 <style>
-.td-top { display:flex; align-items:center; justify-content:space-between; margin:0 0 1rem; }
+.td-top { display:flex; align-items:center; justify-content:space-between; margin:0 0 .3rem; }
 .td-top h1 { font-size:1.6rem; font-weight:800; color:#0F172A; margin:0; }
 .td-badge { padding:.3rem .8rem; border-radius:999px; font-size:.85rem; font-weight:700;
     background:#EEF8EE; color:#3F8A43; border:1px solid #CFE8D0; }
 .td-badge.idle { background:#F3F4F6; color:#64748B; border-color:#E2E8F0; }
-.td-range { color:#64748B; font-size:.9rem; text-align:right; padding-top:.55rem; }
+.td-range { color:#64748B; font-size:.9rem; text-align:right; padding-top:.1rem; }
 .td-kpi { padding:1.1rem 1.3rem; border-radius:20px; background:#fff; min-height:150px;
     border:1px solid #E2E8F0; box-shadow:0 4px 16px rgba(15,23,42,.04); }
 .td-kpi.red { border-color:#F5D0CC; } .td-kpi.amber { border-color:#F3E3B5; }
@@ -138,7 +138,7 @@ def render():
     # ── 상단: 제목 / 기간 / 새로고침 ──────────────────────
     badge = ('<span class="td-badge">● RTSP 실시간 집계 중</span>' if len(all_events)
              else '<span class="td-badge idle">● RTSP 실시간 대기 중</span>')
-    st.markdown(f'<div class="td-top"><h1>탐지 정산 · RTSP</h1>{badge}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="td-top"><h1>📊 탐지 정산 · RTSP</h1>{badge}</div>', unsafe_allow_html=True)
 
     c_period, c_src, c_range = st.columns([2.2, 2.4, 4])
     period = c_period.segmented_control("집계 기간", ["최근 7일", "최근 30일", "전체"],
